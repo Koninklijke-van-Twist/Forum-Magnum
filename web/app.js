@@ -30,6 +30,13 @@
         messageModal: document.getElementById('messageModal'),
         messageTitle: document.getElementById('messageTitle'),
         messageBody: document.getElementById('messageBody'),
+        botEditModal: document.getElementById('botEditModal'),
+        botEditId: document.getElementById('botEditId'),
+        botEditName: document.getElementById('botEditName'),
+        botEditWebhook: document.getElementById('botEditWebhook'),
+        botEditSecret: document.getElementById('botEditSecret'),
+        botEditSkills: document.getElementById('botEditSkills'),
+        botEditSave: document.getElementById('botEditSave'),
         flash: document.getElementById('flash')
     };
 
@@ -112,7 +119,12 @@
             const active = Number(bot.id) === Number(state.selectedBotId) ? ' is-active' : '';
             return (
                 '<div class="bot-card' + active + '" data-bot-id="' + bot.id + '">' +
-                    '<strong>' + escapeHtml(bot.name) + '</strong>' +
+                    '<div class="bot-card-top">' +
+                        '<strong>' + escapeHtml(bot.name) + '</strong>' +
+                        '<button type="button" class="bot-gear" data-bot-settings="' + bot.id + '" title="Bot instellen" aria-label="Bot instellen">' +
+                            '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.1 7.1 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 2h-3.8a.5.5 0 0 0-.49.42l-.36 2.54c-.59.22-1.14.53-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.8 8.48a.5.5 0 0 0 .12.64L4.95 10.7c-.04.31-.06.63-.06.94s.02.63.06.94L2.92 14.16a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.43.34.68.22l2.39-.96c.49.4 1.04.72 1.63.94l.36 2.54c.05.24.25.42.49.42h3.8c.24 0 .44-.18.49-.42l.36-2.54c.59-.22 1.14-.53 1.63-.94l2.39.96c.25.12.54.02.68-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.02-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>' +
+                        '</button>' +
+                    '</div>' +
                     '<div class="meta">' + (bot.uid ? 'UID: ' + escapeHtml(bot.uid) : 'Geen UID') + '</div>' +
                     (bot.bot_api_key
                         ? '<div class="meta">API-token</div><code class="token">' + escapeHtml(bot.bot_api_key) + '</code>'
@@ -247,6 +259,32 @@
         }).catch(function () {});
     }
 
+    function openBotEdit(botId) {
+        const bot = state.bots.find(function (item) {
+            return Number(item.id) === botId;
+        });
+        if (!bot) {
+            showFlash('Bot niet gevonden.', false);
+            return;
+        }
+        if (els.botEditId) {
+            els.botEditId.value = String(bot.id);
+        }
+        if (els.botEditName) {
+            els.botEditName.value = bot.name || '';
+        }
+        if (els.botEditWebhook) {
+            els.botEditWebhook.value = bot.webhook_url || '';
+        }
+        if (els.botEditSecret) {
+            els.botEditSecret.value = bot.webhook_secret || '';
+        }
+        if (els.botEditSkills) {
+            els.botEditSkills.value = (bot.specialties || []).join(', ');
+        }
+        openModal(els.botEditModal);
+    }
+
     function refreshKeys() {
         return api('keys_list').then(function (data) {
             if (!data.success) {
@@ -269,6 +307,13 @@
         }
 
         if (target.closest('.token')) {
+            return;
+        }
+
+        const settingsId = target.closest('[data-bot-settings]');
+        if (settingsId) {
+            event.stopPropagation();
+            openBotEdit(Number(settingsId.getAttribute('data-bot-settings') || 0));
             return;
         }
 
@@ -385,6 +430,29 @@
                 return;
             }
             showFlash('Kopiëren is niet beschikbaar in deze browser.', false);
+        });
+    }
+    if (els.botEditSave) {
+        els.botEditSave.addEventListener('click', function () {
+            const botId = els.botEditId ? Number(els.botEditId.value || 0) : 0;
+            els.botEditSave.disabled = true;
+            api('bot_update', {
+                id: botId,
+                name: els.botEditName ? els.botEditName.value : '',
+                webhook_url: els.botEditWebhook ? els.botEditWebhook.value : '',
+                webhook_secret: els.botEditSecret ? els.botEditSecret.value : '',
+                specialties: els.botEditSkills ? els.botEditSkills.value : ''
+            }).then(function (data) {
+                if (!data.success) {
+                    showFlash(data.error || 'Bot opslaan mislukt.', false);
+                    return;
+                }
+                showFlash('Bot opgeslagen.', true);
+                closeModal(els.botEditModal);
+                return refreshState();
+            }).finally(function () {
+                els.botEditSave.disabled = false;
+            });
         });
     }
     if (els.requestBtn) {

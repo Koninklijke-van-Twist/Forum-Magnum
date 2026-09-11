@@ -204,6 +204,26 @@ try {
             $rejected = $store->rejectRequest($requestId, $user['email']);
             forum_json(['success' => true, 'rejected' => true, 'request' => $rejected]);
 
+        case 'bot_update':
+            forum_require_method(['POST', 'PATCH', 'PUT']);
+            $user = forum_require_human($sessionUser);
+            forum_require_csrf($payload);
+            $botId = (int) ($payload['id'] ?? $payload['bot_id'] ?? 0);
+            if ($botId <= 0) {
+                forum_json(['success' => false, 'error' => 'Bot-id ontbreekt.'], 422);
+            }
+            $fields = [];
+            foreach (['name', 'webhook_url', 'webhook_secret', 'specialties'] as $field) {
+                if (array_key_exists($field, $payload)) {
+                    $fields[$field] = $payload[$field];
+                }
+            }
+            if (array_key_exists('skills', $payload) && !array_key_exists('specialties', $fields)) {
+                $fields['specialties'] = $payload['skills'];
+            }
+            $updated = $store->updateBotForOwner($botId, $user['email'], $fields);
+            forum_json(['success' => true, 'bot' => $updated]);
+
         case 'message':
             $user = forum_require_human($sessionUser);
             $messageId = (int) ($payload['id'] ?? $payload['message_id'] ?? 0);

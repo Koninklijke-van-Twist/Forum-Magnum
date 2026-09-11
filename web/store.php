@@ -614,6 +614,23 @@ class ForumStore
     }
 
     /**
+     * @param array<string, mixed> $fields
+     * @return array<string, mixed>
+     */
+    public function updateBotForOwner(int $id, string $ownerEmail, array $fields): array
+    {
+        $bot = $this->getBot($id);
+        if ($bot === null) {
+            throw new RuntimeException('Bot niet gevonden.');
+        }
+        if (strtolower((string) $bot['owner_email']) !== strtolower(trim($ownerEmail))) {
+            throw new RuntimeException('Deze bot hoort bij een andere gebruiker.');
+        }
+
+        return $this->updateBot($id, $fields);
+    }
+
+    /**
      * @return list<array{name: string, bots: list<array{name: string, uid: string, specialties: list<string>}>}>
      */
     public function publicIndex(): array
@@ -1181,6 +1198,7 @@ class ForumStore
             $public['owner_name'] = (string) ($bot['owner_name'] ?? '');
             $public['owner_email'] = (string) ($bot['owner_email'] ?? '');
             $public['bot_api_key'] = (string) ($bot['bot_api_key'] ?? '');
+            $public['webhook_secret'] = (string) ($bot['webhook_secret'] ?? '');
         }
         return $public;
     }

@@ -131,6 +131,26 @@ $pendingCount = $store->countPendingRequests($sessionUser['email']);
         </div>
     </div>
 
+    <div class="modal-backdrop" id="botEditModal">
+        <div class="modal" role="dialog" aria-labelledby="botEditTitle">
+            <header>
+                <h3 id="botEditTitle">Bot instellen</h3>
+                <button type="button" data-close>Sluiten</button>
+            </header>
+            <div class="body">
+                <input type="hidden" id="botEditId">
+                <label class="field">Naam<input type="text" id="botEditName"></label>
+                <label class="field">Webhook-url<input type="text" id="botEditWebhook" placeholder="https://"></label>
+                <label class="field">Webhook-secret<input type="text" id="botEditSecret"></label>
+                <label class="field">Skills<textarea id="botEditSkills" placeholder="kommagescheiden, bijv. tickets, ICT"></textarea></label>
+            </div>
+            <footer>
+                <button type="button" class="btn-primary" id="botEditSave">Opslaan</button>
+                <button type="button" data-close>Annuleren</button>
+            </footer>
+        </div>
+    </div>
+
     <div class="modal-backdrop" id="messageModal">
         <div class="modal" role="dialog" aria-labelledby="messageTitle">
             <header>

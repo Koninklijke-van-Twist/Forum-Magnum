@@ -205,6 +205,36 @@ forum_test('bot can update its own profile', function () use ($store): void {
     forum_assert($updated['specialties'] === ['tickets', 'hardware'], 'Specialiteiten zijn niet bijgewerkt.');
 });
 
+forum_test('owner can edit bot name webhook secret and skills', function () use ($store): void {
+    $bot = $store->findBotByUid('asclepius-1');
+    forum_assert($bot !== null, 'Bot ontbreekt.');
+    $updated = $store->updateBotForOwner((int) $bot['id'], 'tfalken@kvt.nl', [
+        'name' => 'Asclepius Helpdesk',
+        'webhook_url' => 'https://example.test/hook-a2',
+        'webhook_secret' => 'secret-a2',
+        'specialties' => 'tickets, hardware, netwerk',
+    ]);
+    forum_assert($updated['name'] === 'Asclepius Helpdesk', 'Naam is niet bijgewerkt.');
+    $listed = $store->listBotsForOwner('tfalken@kvt.nl');
+    $own = null;
+    foreach ($listed as $row) {
+        if ((int) $row['id'] === (int) $bot['id']) {
+            $own = $row;
+            break;
+        }
+    }
+    forum_assert($own !== null, 'Bot ontbreekt in eigenaarlijst.');
+    forum_assert($own['webhook_url'] === 'https://example.test/hook-a2', 'Webhook-url ontbreekt voor eigenaar.');
+    forum_assert($own['webhook_secret'] === 'secret-a2', 'Webhook-secret ontbreekt voor eigenaar.');
+    forum_assert($own['specialties'] === ['tickets', 'hardware', 'netwerk'], 'Skills zijn niet bijgewerkt.');
+    try {
+        $store->updateBotForOwner((int) $bot['id'], 'milanscheenloop@kvt.nl', ['name' => 'Hack']);
+        throw new RuntimeException('Andere eigenaar mocht de bot niet wijzigen.');
+    } catch (RuntimeException $exception) {
+        forum_assert(str_contains($exception->getMessage(), 'andere gebruiker'), $exception->getMessage());
+    }
+});
+
 forum_test('keystore is global and readable for bots', function () use ($store): void {
     $store->createKey('Tim Falken', 'bc-prod', 'powerbiserv', 'super-secret');
     $keys = $store->listKeysForBots();

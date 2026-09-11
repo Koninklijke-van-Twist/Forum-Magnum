@@ -235,10 +235,40 @@ button:disabled {
     transform: none;
 }
 
+.bot-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+}
+
 .bot-card strong,
 .log-row strong {
     display: block;
     font-size: 14px;
+}
+
+.bot-gear {
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    color: var(--blue);
+}
+
+.bot-gear:hover {
+    background: #fff;
+    transform: none;
+}
+
+.bot-gear svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
 }
 
 .bot-card .meta,

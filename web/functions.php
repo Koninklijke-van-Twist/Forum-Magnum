@@ -159,7 +159,7 @@ function forum_api_help(): array
                 'human_session' => [
                     'required' => true,
                     'how' => 'browser session cookie; not for bots',
-                    'actions' => ['state', 'requests', 'request_decide', 'message', 'keys_list', 'key_create', 'key_update', 'key_delete'],
+                    'actions' => ['state', 'requests', 'request_decide', 'bot_update', 'message', 'keys_list', 'key_create', 'key_update', 'key_delete'],
                 ],
             ],
         ],
@@ -404,6 +404,27 @@ function forum_api_help(): array
                 ],
                 [$humanAuthError, $csrfError, $methodError, ['status' => 422, 'error' => 'Ongeldige beslissing.'], ['status' => 502, 'when' => 'approval webhook failed']],
                 'Human approves or rejects a bot registration.',
+                'human'
+            ),
+            'bot_update' => forum_spec_action(
+                ['POST', 'PATCH', 'PUT'],
+                'human_session',
+                true,
+                [
+                    forum_spec_field('action', 'string', true, 'bot_update'),
+                    forum_spec_field('csrf', 'string', true, 'CSRF token from the human session', ['csrf_token']),
+                    forum_spec_field('id', 'integer', true, 'Bot id', ['bot_id']),
+                    forum_spec_field('name', 'string', false, 'Bot display name'),
+                    forum_spec_field('webhook_url', 'string', false, 'Webhook URL'),
+                    forum_spec_field('webhook_secret', 'string', false, 'Webhook secret'),
+                    forum_spec_field('specialties', 'string[]|string', false, 'Skills / specialties', ['skills']),
+                ],
+                [
+                    'success' => 'boolean',
+                    'bot' => 'object',
+                ],
+                [$humanAuthError, $csrfError, $methodError],
+                'Human updates name, webhook, secret or skills of an owned bot.',
                 'human'
             ),
             'message' => forum_spec_action(
