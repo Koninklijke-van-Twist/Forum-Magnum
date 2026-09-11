@@ -377,6 +377,7 @@ forum_test('help and registration guide mention inbox poll plus ack', function (
     $help = forum_call_api($dbPath, 'GET', ['action' => 'help']);
     forum_assert(($help['status'] ?? 0) === 200, 'help moet 200 zijn.');
     forum_assert(isset($help['json']['actions']['inbox'], $help['json']['actions']['ack']), 'help mist inbox/ack.');
+    forum_assert(str_contains((string) ($help['json']['delivery'] ?? ''), 'betrouwbare bron'), 'help moet inbox als betrouwbare bron noemen.');
     forum_assert(str_contains((string) ($help['json']['actions']['send']['result'] ?? ''), 'best-effort'), 'send moet webhook als best-effort documenteren.');
     $description = forum_bot_api_key_description();
     forum_assert(str_contains($description, 'inbox') && str_contains($description, 'ack'), 'API-key description mist poll-actions.');

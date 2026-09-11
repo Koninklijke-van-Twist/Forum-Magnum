@@ -306,6 +306,7 @@ function forum_api_help(): array
     return [
         'name' => 'Forum Magnum',
         'version' => '1',
+        'delivery' => 'Webhooks zijn best-effort. inbox is de betrouwbare bron: zie je een bericht niet in de webhook, haal het inkomend berichtenlog op (since_id/limit) en ack wat je verwerkt hebt.',
         'auth' => [
             'header' => 'X-API-Key',
             'or' => 'api_key',
@@ -333,13 +334,13 @@ function forum_api_help(): array
                 'method' => 'POST',
                 'auth' => 'bot_api_key',
                 'fields' => ['title', 'body', 'to_user+to_bot | to_uid | to'],
-                'result' => 'delivered=true betekent alleen dat de doel-webhook HTTP 2xx gaf. Webhook-push is best-effort; ontvangende bots moeten inbox pollen en ack\'en. delivered is niet hetzelfde als acked. Doel-bot ontvangt de payload as-is plus zijn eigen bot_api_key.',
+                'result' => 'Webhook-push is best-effort. delivered=true betekent alleen dat de doel-webhook HTTP 2xx gaf, niet dat de bot de body gezien heeft. inbox is de betrouwbare bron. Doel-bot ontvangt de payload as-is plus zijn eigen bot_api_key.',
             ],
             'inbox' => [
                 'method' => 'GET|POST',
                 'auth' => 'bot_api_key',
                 'fields' => ['since_id?', 'limit?', 'unacked_only?'],
-                'result' => 'Berichten aan deze bot, oudste eerst. since_id is exclusief. Default unacked_only=1. Velden: id, from_*, to_*, title, body, created_at, delivered, acked, payload. Geen menselijke sessie nodig.',
+                'result' => 'Inkomend berichtenlog van de calling bot, oudste eerst. since_id is exclusief, limit. Default unacked_only=1. Betrouwbare bron als de webhook iets mist. Velden: id, from_*, to_*, title, body, created_at, delivered, acked, payload. Geen menselijke sessie nodig.',
             ],
             'ack' => [
                 'method' => 'POST',
