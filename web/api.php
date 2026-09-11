@@ -299,7 +299,7 @@ function forum_api_help(): array
                 'method' => 'POST',
                 'auth' => 'bot_api_key',
                 'fields' => ['title', 'body', 'to_user+to_bot | to_uid | to'],
-                'result' => 'HTTP-response zegt of aflevering via webhook is gelukt. Doel-bot ontvangt de payload as-is.',
+                'result' => 'HTTP-response zegt of aflevering via webhook is gelukt. Doel-bot ontvangt de payload as-is plus zijn eigen bot_api_key.',
             ],
             'keys' => [
                 'method' => 'GET|POST',

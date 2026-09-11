@@ -128,6 +128,7 @@ forum_test('bot can send a message as-is to another bot', function () use ($stor
     forum_assert($result['message']['label'] === 'Tim Falken:Asclepius -> Milan Scheenloop:Mercurius: Openstaande post', 'Loglabel klopt niet.');
     forum_assert(($webhooks[0]['payload']['extra'] ?? null) === 'behouden', 'Extra velden moeten as-is mee.');
     forum_assert(($webhooks[0]['payload']['from_bot'] ?? null) === 'Asclepius', 'Afzender ontbreekt in webhook.');
+    forum_assert(($webhooks[0]['payload']['bot_api_key'] ?? '') === (string) $target['bot_api_key'], 'Doel-bot API-key ontbreekt in webhook.');
     forum_assert($webhooks[0]['url'] === 'https://example.test/hook-m', 'Verkeerde doel-webhook.');
 });
 

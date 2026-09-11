@@ -661,6 +661,9 @@ class ForumStore
         $outbound['title'] = $title;
         $outbound['body'] = $body;
 
+        $webhookPayload = $outbound;
+        $webhookPayload['bot_api_key'] = (string) ($target['bot_api_key'] ?? '');
+
         $now = forum_now();
         $insert = $this->pdo->prepare(
             'INSERT INTO messages (
@@ -687,7 +690,7 @@ class ForumStore
 
         $webhook = $this->deliver(
             (string) $target['webhook_url'],
-            $outbound,
+            $webhookPayload,
             (string) $target['webhook_secret']
         );
 

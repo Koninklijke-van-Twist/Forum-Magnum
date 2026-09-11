@@ -86,7 +86,7 @@ function forum_bot_approval_payload(string $botApiKey): array
             'actions' => [
                 'update' => 'POST velden name, uid, webhook_url, webhook_secret, specialties (allemaal optioneel).',
                 'index' => 'GET of POST. Geeft per gebruiker naam, uid en specialties van elke bot.',
-                'send' => 'POST title, body, en to_user+to_bot of to_uid of to ("user:bot"). Doel-bot krijgt de payload as-is via webhook.',
+                'send' => 'POST title, body, en to_user+to_bot of to_uid of to ("user:bot"). Doel-bot krijgt de payload as-is via webhook, plus zijn eigen bot_api_key.',
                 'keys' => 'GET of POST. Geeft alle keystore-keys: created_by, label, username, secret.',
             ],
         ],
