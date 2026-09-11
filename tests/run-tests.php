@@ -373,14 +373,45 @@ forum_test('existing messages table gets acked column', function () use ($tempDi
     forum_assert($hasAcked, 'acked-kolom ontbreekt na migrate.');
 });
 
-forum_test('help and registration guide mention inbox poll plus ack', function () use ($dbPath): void {
+forum_test('help spec is machine-readable and includes inbox/ack', function () use ($dbPath): void {
     $help = forum_call_api($dbPath, 'GET', ['action' => 'help']);
-    forum_assert(($help['status'] ?? 0) === 200, 'help moet 200 zijn.');
-    forum_assert(isset($help['json']['actions']['inbox'], $help['json']['actions']['ack']), 'help mist inbox/ack.');
-    forum_assert(str_contains((string) ($help['json']['delivery'] ?? ''), 'betrouwbare bron'), 'help moet inbox als betrouwbare bron noemen.');
+    $spec = forum_call_api($dbPath, 'GET', ['action' => 'spec']);
+    forum_assert(($help['status'] ?? 0) === 200, 'help moet 200 zijn zonder auth.');
+    forum_assert(($spec['status'] ?? 0) === 200, 'spec moet 200 zijn zonder auth.');
+    forum_assert(($help['json']['spec_version'] ?? 0) === 1, 'spec_version ontbreekt.');
+    forum_assert(($spec['json']['spec_version'] ?? 0) === 1, 'spec-alias gaf geen zelfde document.');
+    forum_assert(($help['json']['endpoint']['path'] ?? '') === 'api.php', 'endpoint path ontbreekt.');
+    forum_assert(($help['json']['endpoint']['url_shape'] ?? '') === 'api.php?action={action}', 'url_shape ontbreekt.');
+    forum_assert(($help['json']['delivery']['webhooks'] ?? '') === 'best-effort', 'delivery.webhooks moet best-effort zijn.');
+    forum_assert(($help['json']['delivery']['reliable_source'] ?? '') === 'inbox', 'delivery.reliable_source moet inbox zijn.');
+    forum_assert(isset($help['json']['auth']['roles']['bot_api_key'], $help['json']['auth']['roles']['user_access_key']), 'auth.roles ontbreekt.');
+    forum_assert(($help['json']['auth']['header'] ?? '') === 'X-API-Key', 'auth header ontbreekt.');
+
+    foreach (['help', 'spec', 'register', 'update', 'index', 'send', 'inbox', 'ack', 'keys'] as $name) {
+        forum_assert(isset($help['json']['actions'][$name]), 'spec mist action: ' . $name);
+        $action = $help['json']['actions'][$name];
+        forum_assert(isset($action['methods'], $action['auth'], $action['fields'], $action['response'], $action['errors']), 'action-shape incompleet: ' . $name);
+    }
+
+    $inbox = $help['json']['actions']['inbox'];
+    forum_assert($inbox['auth'] === 'bot_api_key' && $inbox['auth_required'] === true, 'inbox-auth klopt niet.');
+    forum_assert(in_array('GET', $inbox['methods'], true) && in_array('POST', $inbox['methods'], true), 'inbox-methods kloppen niet.');
+    $inboxFields = [];
+    foreach ($inbox['fields'] as $field) {
+        forum_assert(isset($field['name'], $field['type']) && array_key_exists('required', $field), 'inbox-field is niet schema-achtig.');
+        $inboxFields[] = (string) $field['name'];
+    }
+    foreach (['since_id', 'limit', 'unacked_only'] as $fieldName) {
+        forum_assert(in_array($fieldName, $inboxFields, true), 'inbox mist veld ' . $fieldName);
+    }
+
+    $ack = $help['json']['actions']['ack'];
+    forum_assert($ack['auth'] === 'bot_api_key' && in_array('POST', $ack['methods'], true), 'ack-spec klopt niet.');
     forum_assert(str_contains((string) ($help['json']['actions']['send']['result'] ?? ''), 'best-effort'), 'send moet webhook als best-effort documenteren.');
+
     $description = forum_bot_api_key_description();
     forum_assert(str_contains($description, 'inbox') && str_contains($description, 'ack'), 'API-key description mist poll-actions.');
+    forum_assert(str_contains($description, 'help/spec'), 'API-key description mist help/spec.');
     $guide = forum_registration_guide();
     forum_assert(str_contains((string) ($guide['after_approval']['next'] ?? ''), 'inbox'), 'Registratiegids noemt inbox niet.');
 });

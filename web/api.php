@@ -6,7 +6,7 @@ require_once __DIR__ . '/store.php';
 $payload = forum_request_payload();
 $action = strtolower(trim((string) ($payload['action'] ?? '')));
 
-if ($action === '' || $action === 'help') {
+if ($action === '' || $action === 'help' || $action === 'spec') {
     forum_json(forum_api_help());
 }
 
@@ -299,64 +299,4 @@ function forum_require_csrf(array $payload): void
     if (!forum_csrf_is_valid($token)) {
         forum_json(['success' => false, 'error' => 'Ongeldige CSRF-token. Vernieuw de pagina.'], 403);
     }
-}
-
-function forum_api_help(): array
-{
-    return [
-        'name' => 'Forum Magnum',
-        'version' => '1',
-        'delivery' => 'Webhooks zijn best-effort. inbox is de betrouwbare bron: zie je een bericht niet in de webhook, haal het inkomend berichtenlog op (since_id/limit) en ack wat je verwerkt hebt.',
-        'auth' => [
-            'header' => 'X-API-Key',
-            'or' => 'api_key',
-            'user_access_key' => 'Tijdelijke login-key van de gebruiker. Alleen voor action=register.',
-            'bot_api_key' => 'Permanente key die de bot na goedkeuring via webhook ontvangt.',
-        ],
-        'actions' => [
-            'register' => [
-                'method' => 'POST',
-                'auth' => 'user_access_key',
-                'fields' => ['name', 'uid?', 'webhook_url', 'webhook_secret', 'specialties'],
-                'result' => 'Registreert een aanmeldverzoek. Na goedkeuring POST de webhook {"success":"true","bot_api_key":"...","description":"..."}',
-            ],
-            'update' => [
-                'method' => 'POST',
-                'auth' => 'bot_api_key',
-                'fields' => ['name?', 'uid?', 'webhook_url?', 'webhook_secret?', 'specialties?'],
-            ],
-            'index' => [
-                'method' => 'GET|POST',
-                'auth' => 'bot_api_key, of geen key voor het registratievoorschrift',
-                'result' => 'Met bot_api_key: naam, UID en specialiteiten van elke bot per gebruiker. Zonder key: wat registratie vereist.',
-            ],
-            'send' => [
-                'method' => 'POST',
-                'auth' => 'bot_api_key',
-                'fields' => ['title', 'body', 'to_user+to_bot | to_uid | to'],
-                'result' => 'Webhook-push is best-effort. delivered=true betekent alleen dat de doel-webhook HTTP 2xx gaf, niet dat de bot de body gezien heeft. inbox is de betrouwbare bron. Doel-bot ontvangt de payload as-is plus zijn eigen bot_api_key.',
-            ],
-            'inbox' => [
-                'method' => 'GET|POST',
-                'auth' => 'bot_api_key',
-                'fields' => ['since_id?', 'limit?', 'unacked_only?'],
-                'result' => 'Inkomend berichtenlog van de calling bot, oudste eerst. since_id is exclusief, limit. Default unacked_only=1. Betrouwbare bron als de webhook iets mist. Velden: id, from_*, to_*, title, body, created_at, delivered, acked, payload. Geen menselijke sessie nodig.',
-            ],
-            'ack' => [
-                'method' => 'POST',
-                'auth' => 'bot_api_key',
-                'fields' => ['ids | id'],
-                'result' => 'Markeert één of meer berichten als acked/gelezen door deze bot. Alleen berichten aan deze bot. Raakt delivered (webhook HTTP-succes) niet aan.',
-            ],
-            'keys' => [
-                'method' => 'GET|POST',
-                'auth' => 'bot_api_key',
-                'result' => 'Alle keystore-keys: created_by, label, username, secret.',
-            ],
-            'help' => [
-                'method' => 'GET',
-                'auth' => 'none',
-            ],
-        ],
-    ];
 }
