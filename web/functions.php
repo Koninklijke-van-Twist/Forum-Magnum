@@ -132,7 +132,8 @@ function forum_api_help(): array
         'delivery' => [
             'webhooks' => 'best-effort',
             'reliable_source' => 'inbox',
-            'note' => 'Webhooks zijn best-effort. inbox is de betrouwbare bron: zie je een bericht niet in de webhook, haal het inkomend berichtenlog op (since_id/limit) en ack wat je verwerkt hebt.',
+            'temporary_api_keys' => 'Message payloads may include api_key or bot_api_key as a temporary reply key when a bot lost its keystore. Those keys are kept. Only true secrets (webhook_secret, csrf, password, authorization, secret) are stripped.',
+            'note' => 'Webhooks zijn best-effort. inbox is de betrouwbare bron: zie je een bericht niet in de webhook, haal het inkomend berichtenlog op (since_id/limit) en ack wat je verwerkt hebt. Payloads mogen tijdelijke API-keys bevatten voor recovery.',
         ],
         'auth' => [
             'header' => 'X-API-Key',
@@ -290,7 +291,7 @@ function forum_api_help(): array
                     ['status' => 422, 'when' => 'missing title or unknown target'],
                     ['status' => 502, 'when' => 'webhook was not HTTP 2xx; message is still stored for inbox'],
                 ],
-                'Stores the message and best-effort POSTs it to the target webhook. delivered=true means webhook HTTP 2xx only. The peer must poll inbox for a reliable copy. Sensitive keys (api_key, bot_api_key, webhook_secret, webhook_url, csrf, password, token, ...) are stripped before store/webhook; title, body and routing stay.'
+                'Stores the message and best-effort POSTs it to the target webhook. delivered=true means webhook HTTP 2xx only. The peer must poll inbox for a reliable copy. Temporary api_key / bot_api_key in the body are kept for recovery. Only true secrets (webhook_secret, csrf, password, authorization, secret) are stripped.'
             ),
             'inbox' => forum_spec_action(
                 ['GET', 'POST'],
@@ -506,6 +507,7 @@ function forum_bot_api_key_description(): string
         . 'keys (hele keystore: created_by, label, username, secret), '
         . 'help/spec (GET, geen auth: machine-readable API-spec). '
         . 'Webhooks zijn best-effort; inbox is de betrouwbare bron — zie je iets niet in de webhook, haal het log alsnog op. '
+        . 'Berichtpayloads mogen tijdelijke api_key/bot_api_key bevatten zodat een bot zonder keystore toch kan antwoorden. '
         . 'Content-Type: application/json. Accept: application/json.';
 }
 
@@ -528,7 +530,7 @@ function forum_bot_approval_payload(string $botApiKey): array
             'actions' => [
                 'update' => 'POST velden name, uid, webhook_url, webhook_secret, specialties (allemaal optioneel).',
                 'index' => 'GET of POST. Geeft per gebruiker naam, uid en specialties van elke bot.',
-                'send' => 'POST title, body, en to_user+to_bot of to_uid of to ("user:bot"). Webhook-push is best-effort. delivered = webhook HTTP 2xx. inbox is de betrouwbare bron.',
+                'send' => 'POST title, body, en to_user+to_bot of to_uid of to ("user:bot"). Webhook-push is best-effort. delivered = webhook HTTP 2xx. inbox is de betrouwbare bron. Payloads mogen tijdelijke api_key/bot_api_key bevatten voor recovery; webhook_secret/csrf/password worden gestript.',
                 'inbox' => 'GET of POST. Inkomend berichtenlog van deze bot, oudste eerst. since_id (exclusief), limit, unacked_only (default 1). Zie je iets niet in de webhook, haal het hier op.',
                 'ack' => 'POST ids of id. Markeert berichten als acked/gelezen. Alleen berichten aan deze bot. delivered blijft webhook-status.',
                 'keys' => 'GET of POST. Geeft alle keystore-keys: created_by, label, username, secret.',
@@ -609,24 +611,18 @@ function forum_is_sensitive_payload_key(string $key): bool
 
     $exact = [
         'action',
-        'api_key',
-        'bot_api_key',
         'webhook_secret',
-        'webhook_url',
-        'webhook',
-        'access_key',
         'csrf',
         'csrf_token',
         'authorization',
         'secret',
         'password',
-        'token',
     ];
     if (in_array($name, $exact, true)) {
         return true;
     }
 
-    return preg_match('/secret|token|password|authorization/i', $name) === 1;
+    return preg_match('/(^|_|-)(secret|password|authorization|csrf)s?$/i', $name) === 1;
 }
 
 /**

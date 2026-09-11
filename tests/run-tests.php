@@ -384,6 +384,8 @@ forum_test('help spec is machine-readable and includes inbox/ack', function () u
     forum_assert(($help['json']['endpoint']['url_shape'] ?? '') === 'api.php?action={action}', 'url_shape ontbreekt.');
     forum_assert(($help['json']['delivery']['webhooks'] ?? '') === 'best-effort', 'delivery.webhooks moet best-effort zijn.');
     forum_assert(($help['json']['delivery']['reliable_source'] ?? '') === 'inbox', 'delivery.reliable_source moet inbox zijn.');
+    forum_assert(str_contains((string) ($help['json']['delivery']['temporary_api_keys'] ?? ''), 'api_key'), 'help moet tijdelijke API-keys in payloads documenteren.');
+    forum_assert(str_contains((string) ($help['json']['actions']['send']['result'] ?? ''), 'Temporary api_key'), 'send-spec moet recovery-keys noemen.');
     forum_assert(isset($help['json']['auth']['roles']['bot_api_key'], $help['json']['auth']['roles']['user_access_key']), 'auth.roles ontbreekt.');
     forum_assert(($help['json']['auth']['header'] ?? '') === 'X-API-Key', 'auth header ontbreekt.');
 
@@ -470,26 +472,24 @@ forum_test('api inbox and ack require a bot key and succeed with one', function 
     forum_assert(!in_array($messageId, $emptyIds, true), 'Geacked bericht bleef in API-inbox.');
 });
 
-forum_test('send strips sender bot_api_key from stored and webhook payload', function () use ($store, &$webhooks): void {
+forum_test('send keeps temporary API keys and strips only true secrets', function () use ($store, &$webhooks): void {
     $sender = $store->findBotByUid('asclepius-1');
     $target = $store->findBotByUid('mercurius-1');
     forum_assert($sender !== null && $target !== null, 'Bots ontbreken.');
-    $senderKey = (string) $sender['bot_api_key'];
-    $targetKey = (string) $target['bot_api_key'];
-    forum_assert($senderKey !== '' && $senderKey !== $targetKey, 'Testkeys zijn niet te onderscheiden.');
+    $replyKey = 'temp-reply-key-for-lost-keystore';
 
     $webhooks = [];
     $result = $store->sendMessage($sender, [
         'to_uid' => 'mercurius-1',
-        'title' => 'Niet lekken',
-        'body' => 'gewone body',
+        'title' => 'Recovery key',
+        'body' => 'gebruik deze key om te antwoorden',
         'extra' => 'blijft',
-        'bot_api_key' => $senderKey,
-        'api_key' => 'sender-api-key',
+        'bot_api_key' => $replyKey,
+        'api_key' => 'temp-api-key',
         'webhook_secret' => 'should-not-leak',
-        'webhook_url' => 'https://evil.example/hook',
+        'csrf' => 'csrf-token',
         'password' => 'hunter2',
-        'access_token' => 'tok',
+        'authorization' => 'Bearer secret',
     ]);
     forum_assert($result['delivered'] === true, 'Send faalde.');
 
@@ -497,16 +497,17 @@ forum_test('send strips sender bot_api_key from stored and webhook payload', fun
     $row->execute([':id' => (int) $result['message']['id']]);
     $stored = json_decode((string) $row->fetchColumn(), true);
     forum_assert(is_array($stored), 'payload_json ontbreekt.');
-    foreach (['bot_api_key', 'api_key', 'webhook_secret', 'webhook_url', 'password', 'access_token'] as $leaked) {
+    forum_assert(($stored['bot_api_key'] ?? null) === $replyKey, 'Tijdelijke bot_api_key moet in payload blijven.');
+    forum_assert(($stored['api_key'] ?? null) === 'temp-api-key', 'Tijdelijke api_key moet in payload blijven.');
+    foreach (['webhook_secret', 'csrf', 'password', 'authorization'] as $leaked) {
         forum_assert(!array_key_exists($leaked, $stored), 'Opgeslagen payload lekt ' . $leaked);
     }
     forum_assert(($stored['extra'] ?? null) === 'blijft', 'Niet-gevoelige velden moeten blijven.');
-    forum_assert(($stored['title'] ?? '') === 'Niet lekken', 'Titel verdween bij strip.');
 
     $hook = $webhooks[0]['payload'] ?? [];
-    forum_assert(($hook['bot_api_key'] ?? null) !== $senderKey, 'Sender bot_api_key lekte naar webhook.');
-    forum_assert(($hook['bot_api_key'] ?? '') === $targetKey, 'Webhook moet de doel-bot key houden.');
-    foreach (['api_key', 'webhook_secret', 'webhook_url', 'password', 'access_token'] as $leaked) {
+    forum_assert(($hook['bot_api_key'] ?? null) === $replyKey, 'Tijdelijke bot_api_key moet in webhook blijven.');
+    forum_assert(($hook['api_key'] ?? null) === 'temp-api-key', 'Tijdelijke api_key moet in webhook blijven.');
+    foreach (['webhook_secret', 'csrf', 'password', 'authorization'] as $leaked) {
         forum_assert(!array_key_exists($leaked, $hook), 'Webhook-payload lekt ' . $leaked);
     }
     forum_assert(($hook['extra'] ?? null) === 'blijft', 'Webhook verloor extra veld.');

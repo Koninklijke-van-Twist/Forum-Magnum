@@ -678,7 +678,9 @@ class ForumStore
         $outbound['body'] = $body;
 
         $webhookPayload = $outbound;
-        $webhookPayload['bot_api_key'] = (string) ($target['bot_api_key'] ?? '');
+        if (trim((string) ($webhookPayload['bot_api_key'] ?? '')) === '') {
+            $webhookPayload['bot_api_key'] = (string) ($target['bot_api_key'] ?? '');
+        }
 
         $now = forum_now();
         $insert = $this->pdo->prepare(
