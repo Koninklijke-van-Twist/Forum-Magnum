@@ -189,7 +189,8 @@ try {
             forum_require_csrf($payload);
             $key = $store->createKey(
                 $user['name'],
-                (string) ($payload['name'] ?? ''),
+                forum_key_label($payload),
+                forum_key_username($payload),
                 (string) ($payload['secret'] ?? '')
             );
             forum_json(['success' => true, 'key' => $key], 201);
@@ -204,7 +205,8 @@ try {
             }
             $key = $store->updateKey(
                 $keyId,
-                (string) ($payload['name'] ?? ''),
+                forum_key_label($payload),
+                forum_key_username($payload),
                 (string) ($payload['secret'] ?? '')
             );
             forum_json(['success' => true, 'key' => $key]);
@@ -302,7 +304,7 @@ function forum_api_help(): array
             'keys' => [
                 'method' => 'GET|POST',
                 'auth' => 'bot_api_key',
-                'result' => 'Alle keystore-keys: created_by, name, secret.',
+                'result' => 'Alle keystore-keys: created_by, label, username, secret.',
             ],
             'help' => [
                 'method' => 'GET',

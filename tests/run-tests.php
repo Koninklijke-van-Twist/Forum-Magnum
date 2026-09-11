@@ -142,12 +142,14 @@ forum_test('bot can update its own profile', function () use ($store): void {
 });
 
 forum_test('keystore is global and readable for bots', function () use ($store): void {
-    $store->createKey('Tim Falken', 'bc-prod', 'super-secret');
+    $store->createKey('Tim Falken', 'bc-prod', 'powerbiserv', 'super-secret');
     $keys = $store->listKeysForBots();
     forum_assert(count($keys) === 1, 'Keystore moet één key hebben.');
     forum_assert($keys[0]['created_by'] === 'Tim Falken', 'Aanmaker ontbreekt.');
+    forum_assert($keys[0]['label'] === 'bc-prod', 'Label ontbreekt.');
+    forum_assert($keys[0]['username'] === 'powerbiserv', 'Inlognaam ontbreekt.');
     forum_assert($keys[0]['secret'] === 'super-secret', 'Secret ontbreekt.');
-    $store->updateKey((int) $store->listKeys()[0]['id'], 'bc-prod', 'rotated');
+    $store->updateKey((int) $store->listKeys()[0]['id'], 'bc-prod', 'powerbiserv', 'rotated');
     $store->deleteKey((int) $store->listKeys()[0]['id']);
     forum_assert($store->listKeys() === [], 'Key is niet verwijderd.');
 });

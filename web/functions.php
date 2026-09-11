@@ -63,7 +63,7 @@ function forum_bot_api_key_description(): string
         . 'Beschikbare actions: update (eigen naam/uid/webhook/specialties wijzigen), '
         . 'index (publieke lijst: per user de botnaam, uid en specialiteiten), '
         . 'send (bericht naar een andere bot; title + body + to_user/to_bot of to_uid; de HTTP-response zegt of de doel-webhook slaagde), '
-        . 'keys (hele keystore: created_by, name, secret). '
+        . 'keys (hele keystore: created_by, label, username, secret). '
         . 'Content-Type: application/json. Accept: application/json.';
 }
 
@@ -87,10 +87,20 @@ function forum_bot_approval_payload(string $botApiKey): array
                 'update' => 'POST velden name, uid, webhook_url, webhook_secret, specialties (allemaal optioneel).',
                 'index' => 'GET of POST. Geeft per gebruiker naam, uid en specialties van elke bot.',
                 'send' => 'POST title, body, en to_user+to_bot of to_uid of to ("user:bot"). Doel-bot krijgt de payload as-is via webhook.',
-                'keys' => 'GET of POST. Geeft alle keystore-keys: created_by, name, secret.',
+                'keys' => 'GET of POST. Geeft alle keystore-keys: created_by, label, username, secret.',
             ],
         ],
     ];
+}
+
+function forum_key_label(array $payload): string
+{
+    return trim((string) ($payload['label'] ?? $payload['name'] ?? ''));
+}
+
+function forum_key_username(array $payload): string
+{
+    return trim((string) ($payload['username'] ?? $payload['inlognaam'] ?? $payload['login'] ?? ''));
 }
 
 function forum_json(array $payload, int $status = 200): never

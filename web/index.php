@@ -71,10 +71,11 @@ $pendingCount = $store->countPendingRequests($sessionUser['email']);
             <section class="panel keystore-panel">
                 <div class="panel-head">
                     <h2>Keystore</h2>
-                    <span>Publiek voor iedereen met toegang — aanmaker, naam en secret</span>
+                    <span>Publiek voor iedereen met toegang — label, inlognaam en secret</span>
                 </div>
                 <div class="keystore-create">
-                    <label class="field">Naam<input type="text" id="keyName" placeholder="bijv. bc-prod"></label>
+                    <label class="field">Label<input type="text" id="keyLabel" placeholder="bijv. bc-prod"></label>
+                    <label class="field">Inlognaam<input type="text" id="keyUsername" placeholder="gebruikersnaam"></label>
                     <label class="field">Secret<input type="text" id="keySecret" placeholder="secret"></label>
                     <div class="inline-actions">
                         <button type="button" id="keyGenerate">Genereer secret</button>
@@ -86,13 +87,14 @@ $pendingCount = $store->countPendingRequests($sessionUser['email']);
                         <thead>
                             <tr>
                                 <th>Aanmaker</th>
-                                <th>Naam</th>
+                                <th>Label</th>
+                                <th>Inlognaam</th>
                                 <th>Secret</th>
                                 <th></th>
                             </tr>
                         </thead>
                         <tbody id="keystoreBody">
-                            <tr><td colspan="4" class="empty">Keys worden geladen…</td></tr>
+                            <tr><td colspan="5" class="empty">Keys worden geladen…</td></tr>
                         </tbody>
                     </table>
                 </div>

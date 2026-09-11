@@ -114,6 +114,21 @@ class ForumStore
                 updated_at INTEGER NOT NULL
             )'
         );
+        $this->ensureKeystoreUsernameColumn();
+    }
+
+    private function ensureKeystoreUsernameColumn(): void
+    {
+        $hasUsername = false;
+        foreach ($this->pdo->query('PRAGMA table_info(keystore)') as $column) {
+            if (strtolower((string) ($column['name'] ?? '')) === 'username') {
+                $hasUsername = true;
+                break;
+            }
+        }
+        if (!$hasUsername) {
+            $this->pdo->exec('ALTER TABLE keystore ADD COLUMN username TEXT NOT NULL DEFAULT ""');
+        }
     }
 
     /**
@@ -752,14 +767,15 @@ class ForumStore
     }
 
     /**
-     * @return list<array{name: string, secret: string, created_by: string}>
+     * @return list<array{label: string, username: string, secret: string, created_by: string}>
      */
     public function listKeysForBots(): array
     {
         $keys = [];
         foreach ($this->listKeys() as $key) {
             $keys[] = [
-                'name' => (string) $key['name'],
+                'label' => (string) $key['label'],
+                'username' => (string) $key['username'],
                 'secret' => (string) $key['secret'],
                 'created_by' => (string) $key['created_by'],
             ];
@@ -770,13 +786,14 @@ class ForumStore
     /**
      * @return array<string, mixed>
      */
-    public function createKey(string $creatorName, string $name, string $secret): array
+    public function createKey(string $creatorName, string $label, string $username, string $secret): array
     {
-        $name = trim($name);
+        $label = trim($label);
+        $username = trim($username);
         $secret = (string) $secret;
         $creatorName = trim($creatorName);
-        if ($name === '' || $secret === '') {
-            throw new InvalidArgumentException('Naam en secret van de key zijn verplicht.');
+        if ($label === '' || $username === '' || $secret === '') {
+            throw new InvalidArgumentException('Label, inlognaam en secret van de key zijn verplicht.');
         }
         if ($creatorName === '') {
             throw new InvalidArgumentException('Gebruikersnaam van de aanmaker ontbreekt.');
@@ -784,12 +801,13 @@ class ForumStore
 
         $now = forum_now();
         $statement = $this->pdo->prepare(
-            'INSERT INTO keystore (creator_name, name, secret, created_at, updated_at)
-             VALUES (:creator_name, :name, :secret, :created_at, :updated_at)'
+            'INSERT INTO keystore (creator_name, name, username, secret, created_at, updated_at)
+             VALUES (:creator_name, :label, :username, :secret, :created_at, :updated_at)'
         );
         $statement->execute([
             ':creator_name' => $creatorName,
-            ':name' => $name,
+            ':label' => $label,
+            ':username' => $username,
             ':secret' => $secret,
             ':created_at' => $now,
             ':updated_at' => $now,
@@ -801,24 +819,26 @@ class ForumStore
     /**
      * @return array<string, mixed>
      */
-    public function updateKey(int $id, string $name, string $secret): array
+    public function updateKey(int $id, string $label, string $username, string $secret): array
     {
         $existing = $this->getKey($id);
         if ($existing === null) {
             throw new RuntimeException('Key niet gevonden.');
         }
 
-        $name = trim($name);
+        $label = trim($label);
+        $username = trim($username);
         $secret = (string) $secret;
-        if ($name === '' || $secret === '') {
-            throw new InvalidArgumentException('Naam en secret van de key zijn verplicht.');
+        if ($label === '' || $username === '' || $secret === '') {
+            throw new InvalidArgumentException('Label, inlognaam en secret van de key zijn verplicht.');
         }
 
         $statement = $this->pdo->prepare(
-            'UPDATE keystore SET name = :name, secret = :secret, updated_at = :updated_at WHERE id = :id'
+            'UPDATE keystore SET name = :label, username = :username, secret = :secret, updated_at = :updated_at WHERE id = :id'
         );
         $statement->execute([
-            ':name' => $name,
+            ':label' => $label,
+            ':username' => $username,
             ':secret' => $secret,
             ':updated_at' => forum_now(),
             ':id' => $id,
@@ -1093,7 +1113,8 @@ class ForumStore
         return [
             'id' => (int) ($row['id'] ?? 0),
             'created_by' => (string) ($row['creator_name'] ?? ''),
-            'name' => (string) ($row['name'] ?? ''),
+            'label' => (string) ($row['name'] ?? ''),
+            'username' => (string) ($row['username'] ?? ''),
             'secret' => (string) ($row['secret'] ?? ''),
             'created_at' => (int) ($row['created_at'] ?? 0),
             'updated_at' => (int) ($row['updated_at'] ?? 0),

@@ -22,7 +22,8 @@
         requestsModal: document.getElementById('requestsModal'),
         requestsBody: document.getElementById('requestsBody'),
         keystoreBody: document.getElementById('keystoreBody'),
-        keyName: document.getElementById('keyName'),
+        keyLabel: document.getElementById('keyLabel'),
+        keyUsername: document.getElementById('keyUsername'),
         keySecret: document.getElementById('keySecret'),
         keyCreate: document.getElementById('keyCreate'),
         keyGenerate: document.getElementById('keyGenerate'),
@@ -185,14 +186,15 @@
             return;
         }
         if (state.keys.length === 0) {
-            els.keystoreBody.innerHTML = '<tr><td colspan="4" class="empty">Nog geen keys in de keystore.</td></tr>';
+            els.keystoreBody.innerHTML = '<tr><td colspan="5" class="empty">Nog geen keys in de keystore.</td></tr>';
             return;
         }
         els.keystoreBody.innerHTML = state.keys.map(function (key) {
             return (
                 '<tr data-key-id="' + key.id + '">' +
                     '<td>' + escapeHtml(key.created_by) + '</td>' +
-                    '<td><input type="text" data-key-name value="' + escapeHtml(key.name) + '"></td>' +
+                    '<td><input type="text" data-key-label value="' + escapeHtml(key.label) + '"></td>' +
+                    '<td><input type="text" data-key-username value="' + escapeHtml(key.username) + '"></td>' +
                     '<td><input type="text" class="secret" data-key-secret value="' + escapeHtml(key.secret) + '"></td>' +
                     '<td class="key-actions">' +
                         '<button type="button" class="btn-primary" data-key-save="' + key.id + '">Opslaan</button>' +
@@ -325,11 +327,13 @@
         const saveId = target.getAttribute('data-key-save');
         if (saveId) {
             const card = target.closest('[data-key-id]');
-            const name = card ? card.querySelector('[data-key-name]') : null;
+            const label = card ? card.querySelector('[data-key-label]') : null;
+            const username = card ? card.querySelector('[data-key-username]') : null;
             const secret = card ? card.querySelector('[data-key-secret]') : null;
             api('key_update', {
                 id: Number(saveId),
-                name: name ? name.value : '',
+                label: label ? label.value : '',
+                username: username ? username.value : '',
                 secret: secret ? secret.value : ''
             }).then(function (data) {
                 if (data.success) {
@@ -396,15 +400,19 @@
     if (els.keyCreate) {
         els.keyCreate.addEventListener('click', function () {
             api('key_create', {
-                name: els.keyName ? els.keyName.value : '',
+                label: els.keyLabel ? els.keyLabel.value : '',
+                username: els.keyUsername ? els.keyUsername.value : '',
                 secret: els.keySecret ? els.keySecret.value : ''
             }).then(function (data) {
                 if (!data.success) {
                     showFlash(data.error || 'Key aanmaken mislukt.', false);
                     return;
                 }
-                if (els.keyName) {
-                    els.keyName.value = '';
+                if (els.keyLabel) {
+                    els.keyLabel.value = '';
+                }
+                if (els.keyUsername) {
+                    els.keyUsername.value = '';
                 }
                 if (els.keySecret) {
                     els.keySecret.value = '';
