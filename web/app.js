@@ -111,11 +111,14 @@
             }).join('');
             const active = Number(bot.id) === Number(state.selectedBotId) ? ' is-active' : '';
             return (
-                '<button type="button" class="bot-card' + active + '" data-bot-id="' + bot.id + '">' +
+                '<div class="bot-card' + active + '" data-bot-id="' + bot.id + '">' +
                     '<strong>' + escapeHtml(bot.name) + '</strong>' +
                     '<div class="meta">' + (bot.uid ? 'UID: ' + escapeHtml(bot.uid) : 'Geen UID') + '</div>' +
+                    (bot.bot_api_key
+                        ? '<div class="meta">API-token</div><code class="token">' + escapeHtml(bot.bot_api_key) + '</code>'
+                        : '') +
                     (tags ? '<div class="tags">' + tags + '</div>' : '') +
-                '</button>'
+                '</div>'
             );
         }).join('');
     }
@@ -262,6 +265,10 @@
 
         if (target.closest('[data-close]')) {
             closeModal(target.closest('.modal-backdrop'));
+            return;
+        }
+
+        if (target.closest('.token')) {
             return;
         }
 

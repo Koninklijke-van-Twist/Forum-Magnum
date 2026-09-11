@@ -248,6 +248,19 @@ button:disabled {
     font-size: 12px;
 }
 
+.bot-card .token {
+    display: block;
+    margin-top: 4px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: #0f2740;
+    color: #e8f4ff;
+    font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+    user-select: all;
+}
+
 .tags {
     display: flex;
     flex-wrap: wrap;

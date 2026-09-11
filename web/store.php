@@ -1180,6 +1180,7 @@ class ForumStore
         if ($includeOwnerFields) {
             $public['owner_name'] = (string) ($bot['owner_name'] ?? '');
             $public['owner_email'] = (string) ($bot['owner_email'] ?? '');
+            $public['bot_api_key'] = (string) ($bot['bot_api_key'] ?? '');
         }
         return $public;
     }
