@@ -12,14 +12,14 @@ if ($action === '' || $action === 'help' || $action === 'spec') {
 
 $dbPath = getenv('FORUM_DB_PATH');
 $store = new ForumStore(is_string($dbPath) && $dbPath !== '' ? $dbPath : null);
-$apiKey = forum_request_api_key($payload);
+$apiKey = forum_request_bot_credential($payload, $action);
 $sessionUser = forum_session_user();
 
 if ($sessionUser !== null && $sessionUser['api_key'] !== '') {
     $store->touchUser($sessionUser['email'], $sessionUser['name'], $sessionUser['api_key']);
 }
 
-$bot = $apiKey !== '' ? $store->findBotByApiKey($apiKey) : null;
+$bot = $apiKey !== '' ? $store->findBotByCredential($apiKey) : null;
 $accessUser = ($bot === null && $apiKey !== '') ? $store->findUserByAccessKey($apiKey) : null;
 
 try {
@@ -37,6 +37,14 @@ try {
             $webhookUrl = trim((string) ($payload['webhook_url'] ?? $payload['webhook'] ?? ''));
             $webhookSecret = (string) ($payload['webhook_secret'] ?? $payload['secret'] ?? '');
             $specialties = forum_normalize_specialties($payload['specialties'] ?? $payload['specialities'] ?? []);
+            $grokAgentId = trim((string) ($payload['grok_agent_id'] ?? $payload['agent_id'] ?? ''));
+            $ownerEmail = trim((string) ($payload['owner_email'] ?? ''));
+            if ($ownerEmail !== '' && strtolower($ownerEmail) !== strtolower((string) $accessUser['email'])) {
+                forum_json([
+                    'success' => false,
+                    'error' => 'owner_email komt niet overeen met de gebruiker van deze access key.',
+                ], 422);
+            }
             if ($name === '') {
                 forum_json(['success' => false, 'error' => 'Botnaam is verplicht.'], 422);
             }
@@ -53,7 +61,8 @@ try {
                 $uid,
                 $webhookUrl,
                 $webhookSecret,
-                $specialties
+                $specialties,
+                $grokAgentId
             );
             forum_json([
                 'success' => true,
@@ -65,10 +74,10 @@ try {
         case 'update':
             forum_require_method(['POST', 'PATCH', 'PUT']);
             if ($bot === null) {
-                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key.'], 401);
+                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key of webhook_secret.'], 401);
             }
             $fields = [];
-            foreach (['name', 'uid', 'webhook_url', 'webhook_secret', 'specialties'] as $field) {
+            foreach (['name', 'uid', 'webhook_url', 'webhook_secret', 'specialties', 'grok_agent_id'] as $field) {
                 if (array_key_exists($field, $payload)) {
                     $fields[$field] = $payload[$field];
                 }
@@ -85,6 +94,9 @@ try {
             if (array_key_exists('specialities', $payload) && !array_key_exists('specialties', $fields)) {
                 $fields['specialties'] = $payload['specialities'];
             }
+            if (array_key_exists('agent_id', $payload) && !array_key_exists('grok_agent_id', $fields)) {
+                $fields['grok_agent_id'] = $payload['agent_id'];
+            }
             $updated = $store->updateBot((int) $bot['id'], $fields);
             forum_json(['success' => true, 'bot' => $updated]);
 
@@ -100,7 +112,7 @@ try {
         case 'send':
             forum_require_method(['POST']);
             if ($bot === null) {
-                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key.'], 401);
+                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key of webhook_secret.'], 401);
             }
             $result = $store->sendMessage($bot, $payload);
             forum_json([
@@ -116,7 +128,7 @@ try {
         case 'inbox':
             forum_require_method(['GET', 'POST']);
             if ($bot === null) {
-                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key.'], 401);
+                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key of webhook_secret.'], 401);
             }
             $sinceId = (int) ($payload['since_id'] ?? 0);
             $limit = forum_inbox_limit((int) ($payload['limit'] ?? 0));
@@ -136,7 +148,7 @@ try {
         case 'ack':
             forum_require_method(['POST']);
             if ($bot === null) {
-                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key.'], 401);
+                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key of webhook_secret.'], 401);
             }
             $ids = forum_normalize_ids($payload['ids'] ?? $payload['id'] ?? $payload['message_ids'] ?? $payload['message_id'] ?? []);
             $result = $store->ackMessages($bot, $ids);
@@ -149,7 +161,7 @@ try {
 
         case 'keys':
             if ($bot === null) {
-                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key.'], 401);
+                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key of webhook_secret.'], 401);
             }
             forum_json([
                 'success' => true,
@@ -213,13 +225,16 @@ try {
                 forum_json(['success' => false, 'error' => 'Bot-id ontbreekt.'], 422);
             }
             $fields = [];
-            foreach (['name', 'webhook_url', 'webhook_secret', 'specialties'] as $field) {
+            foreach (['name', 'webhook_url', 'webhook_secret', 'specialties', 'grok_agent_id'] as $field) {
                 if (array_key_exists($field, $payload)) {
                     $fields[$field] = $payload[$field];
                 }
             }
             if (array_key_exists('skills', $payload) && !array_key_exists('specialties', $fields)) {
                 $fields['specialties'] = $payload['skills'];
+            }
+            if (array_key_exists('agent_id', $payload) && !array_key_exists('grok_agent_id', $fields)) {
+                $fields['grok_agent_id'] = $payload['agent_id'];
             }
             $updated = $store->updateBotForOwner($botId, $user['email'], $fields);
             forum_json(['success' => true, 'bot' => $updated]);

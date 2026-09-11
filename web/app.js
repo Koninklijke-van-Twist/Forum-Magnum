@@ -33,6 +33,7 @@
         botEditModal: document.getElementById('botEditModal'),
         botEditId: document.getElementById('botEditId'),
         botEditName: document.getElementById('botEditName'),
+        botEditGrokAgent: document.getElementById('botEditGrokAgent'),
         botEditWebhook: document.getElementById('botEditWebhook'),
         botEditSecret: document.getElementById('botEditSecret'),
         botEditSkills: document.getElementById('botEditSkills'),
@@ -101,6 +102,20 @@
             .replace(/"/g, '&quot;');
     }
 
+    function identityMeta(item) {
+        const owner = item && item.owner_email ? item.owner_email : '';
+        const uid = item && item.uid ? item.uid : '';
+        const agent = item && item.grok_agent_id ? item.grok_agent_id : '';
+        return (
+            '<div class="identity">' +
+                '<div class="meta">Eigenaar: ' + escapeHtml(owner || '—') + '</div>' +
+                '<div class="meta">Bot: ' + escapeHtml((item && item.name) || '—') + '</div>' +
+                '<div class="meta">UID: ' + escapeHtml(uid || '—') + '</div>' +
+                '<div class="meta">Grok-agent: ' + escapeHtml(agent || '—') + '</div>' +
+            '</div>'
+        );
+    }
+
     function renderBots() {
         if (!els.botList) {
             return;
@@ -125,7 +140,7 @@
                             '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.1 7.1 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 2h-3.8a.5.5 0 0 0-.49.42l-.36 2.54c-.59.22-1.14.53-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.8 8.48a.5.5 0 0 0 .12.64L4.95 10.7c-.04.31-.06.63-.06.94s.02.63.06.94L2.92 14.16a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.43.34.68.22l2.39-.96c.49.4 1.04.72 1.63.94l.36 2.54c.05.24.25.42.49.42h3.8c.24 0 .44-.18.49-.42l.36-2.54c.59-.22 1.14-.53 1.63-.94l2.39.96c.25.12.54.02.68-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.02-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>' +
                         '</button>' +
                     '</div>' +
-                    '<div class="meta">' + (bot.uid ? 'UID: ' + escapeHtml(bot.uid) : 'Geen UID') + '</div>' +
+                    identityMeta(bot) +
                     (bot.bot_api_key
                         ? '<div class="meta">API-token</div><code class="token">' + escapeHtml(bot.bot_api_key) + '</code>'
                         : '') +
@@ -180,7 +195,7 @@
             return (
                 '<article class="request-card">' +
                     '<h4>' + escapeHtml(request.name) + '</h4>' +
-                    '<div class="meta">UID: ' + escapeHtml(request.uid || '—') + '</div>' +
+                    identityMeta(request) +
                     '<div class="meta">Webhook: ' + escapeHtml(request.webhook_url) + '</div>' +
                     (tags ? '<div class="tags">' + tags + '</div>' : '') +
                     '<div class="request-actions">' +
@@ -272,6 +287,9 @@
         }
         if (els.botEditName) {
             els.botEditName.value = bot.name || '';
+        }
+        if (els.botEditGrokAgent) {
+            els.botEditGrokAgent.value = bot.grok_agent_id || '';
         }
         if (els.botEditWebhook) {
             els.botEditWebhook.value = bot.webhook_url || '';
@@ -439,6 +457,7 @@
             api('bot_update', {
                 id: botId,
                 name: els.botEditName ? els.botEditName.value : '',
+                grok_agent_id: els.botEditGrokAgent ? els.botEditGrokAgent.value : '',
                 webhook_url: els.botEditWebhook ? els.botEditWebhook.value : '',
                 webhook_secret: els.botEditSecret ? els.botEditSecret.value : '',
                 specialties: els.botEditSkills ? els.botEditSkills.value : ''

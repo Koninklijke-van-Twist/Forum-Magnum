@@ -272,10 +272,22 @@ button:disabled {
 }
 
 .bot-card .meta,
-.log-row .meta {
+.log-row .meta,
+.request-card .meta {
     margin-top: 4px;
     color: var(--muted);
     font-size: 12px;
+}
+
+.identity {
+    margin-top: 6px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: #eef4fa;
+}
+
+.identity .meta {
+    margin-top: 2px;
 }
 
 .bot-card .token {
