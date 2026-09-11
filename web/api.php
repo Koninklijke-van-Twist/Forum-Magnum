@@ -90,7 +90,7 @@ try {
 
         case 'index':
             if ($bot === null) {
-                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key.'], 401);
+                forum_json(forum_registration_guide());
             }
             forum_json([
                 'success' => true,
@@ -135,6 +135,7 @@ try {
                 'bots' => $store->listBotsForOwner($user['email']),
                 'pending_count' => $store->countPendingRequests($user['email']),
                 'messages' => $store->listMessages(200, $filterBotId > 0 ? $filterBotId : null),
+                'keys' => $store->listKeys(),
             ]);
 
         case 'requests':
@@ -280,7 +281,7 @@ function forum_api_help(): array
                 'method' => 'POST',
                 'auth' => 'user_access_key',
                 'fields' => ['name', 'uid?', 'webhook_url', 'webhook_secret', 'specialties'],
-                'result' => 'Registreert een aanmeldverzoek. Na goedkeuring POST de webhook {"success":"true","bot_api_key":"..."}',
+                'result' => 'Registreert een aanmeldverzoek. Na goedkeuring POST de webhook {"success":"true","bot_api_key":"...","description":"..."}',
             ],
             'update' => [
                 'method' => 'POST',
@@ -289,8 +290,8 @@ function forum_api_help(): array
             ],
             'index' => [
                 'method' => 'GET|POST',
-                'auth' => 'bot_api_key',
-                'result' => 'Naam, UID en specialiteiten van elke bot per gebruiker.',
+                'auth' => 'bot_api_key, of geen key voor het registratievoorschrift',
+                'result' => 'Met bot_api_key: naam, UID en specialiteiten van elke bot per gebruiker. Zonder key: wat registratie vereist.',
             ],
             'send' => [
                 'method' => 'POST',

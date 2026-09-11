@@ -386,10 +386,7 @@ class ForumStore
 
         $webhook = $this->deliver(
             (string) $bot['webhook_url'],
-            [
-                'success' => 'true',
-                'bot_api_key' => $botApiKey,
-            ],
+            forum_bot_approval_payload($botApiKey),
             (string) $bot['webhook_secret']
         );
 

@@ -16,13 +16,11 @@
         requestBtn: document.getElementById('requestBtn'),
         requestCount: document.getElementById('requestCount'),
         accessKeyBtn: document.getElementById('accessKeyBtn'),
-        keystoreBtn: document.getElementById('keystoreBtn'),
         accessKeyModal: document.getElementById('accessKeyModal'),
         accessKeyValue: document.getElementById('accessKeyValue'),
         copyAccessKey: document.getElementById('copyAccessKey'),
         requestsModal: document.getElementById('requestsModal'),
         requestsBody: document.getElementById('requestsBody'),
-        keystoreModal: document.getElementById('keystoreModal'),
         keystoreBody: document.getElementById('keystoreBody'),
         keyName: document.getElementById('keyName'),
         keySecret: document.getElementById('keySecret'),
@@ -178,25 +176,29 @@
         }).join('');
     }
 
+    function keystoreIsEditing() {
+        return !!(els.keystoreBody && els.keystoreBody.contains(document.activeElement));
+    }
+
     function renderKeys() {
         if (!els.keystoreBody) {
             return;
         }
         if (state.keys.length === 0) {
-            els.keystoreBody.innerHTML = '<div class="empty">Nog geen keys in de keystore.</div>';
+            els.keystoreBody.innerHTML = '<tr><td colspan="4" class="empty">Nog geen keys in de keystore.</td></tr>';
             return;
         }
         els.keystoreBody.innerHTML = state.keys.map(function (key) {
             return (
-                '<article class="key-card" data-key-id="' + key.id + '">' +
-                    '<label class="field">Naam<input type="text" data-key-name value="' + escapeHtml(key.name) + '"></label>' +
-                    '<label class="field">Secret<textarea data-key-secret>' + escapeHtml(key.secret) + '</textarea></label>' +
-                    '<div class="meta">Aangemaakt door ' + escapeHtml(key.created_by) + '</div>' +
-                    '<div class="key-actions">' +
+                '<tr data-key-id="' + key.id + '">' +
+                    '<td>' + escapeHtml(key.created_by) + '</td>' +
+                    '<td><input type="text" data-key-name value="' + escapeHtml(key.name) + '"></td>' +
+                    '<td><input type="text" class="secret" data-key-secret value="' + escapeHtml(key.secret) + '"></td>' +
+                    '<td class="key-actions">' +
                         '<button type="button" class="btn-primary" data-key-save="' + key.id + '">Opslaan</button>' +
                         '<button type="button" class="btn-danger" data-key-delete="' + key.id + '">Verwijderen</button>' +
-                    '</div>' +
-                '</article>'
+                    '</td>' +
+                '</tr>'
             );
         }).join('');
     }
@@ -208,9 +210,13 @@
         if (data.user && data.user.access_key && els.accessKeyValue) {
             els.accessKeyValue.textContent = data.user.access_key;
         }
+        state.keys = data.keys || [];
         renderBots();
         renderMessages();
         updateRequestButton();
+        if (!keystoreIsEditing()) {
+            renderKeys();
+        }
     }
 
     function refreshState() {
@@ -318,7 +324,7 @@
 
         const saveId = target.getAttribute('data-key-save');
         if (saveId) {
-            const card = target.closest('.key-card');
+            const card = target.closest('[data-key-id]');
             const name = card ? card.querySelector('[data-key-name]') : null;
             const secret = card ? card.querySelector('[data-key-secret]') : null;
             api('key_update', {
@@ -375,13 +381,6 @@
             refreshRequests().then(function () {
                 renderRequests();
                 openModal(els.requestsModal);
-            });
-        });
-    }
-    if (els.keystoreBtn) {
-        els.keystoreBtn.addEventListener('click', function () {
-            refreshKeys().then(function () {
-                openModal(els.keystoreModal);
             });
         });
     }

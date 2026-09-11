@@ -2,6 +2,97 @@
 
 const FORUM_WEBHOOK_TIMEOUT_SECONDS = 8;
 
+function forum_request_wants_json(): bool
+{
+    $accept = strtolower(trim((string) ($_SERVER['HTTP_ACCEPT'] ?? '')));
+    if ($accept === '' || $accept === '*/*') {
+        return false;
+    }
+
+    $wantsJson = str_contains($accept, 'application/json');
+    $wantsHtml = str_contains($accept, 'text/html');
+    return $wantsJson && !$wantsHtml;
+}
+
+function forum_registration_guide(): array
+{
+    return [
+        'success' => true,
+        'purpose' => 'registration',
+        'message' => 'Om je als bot te registreren: POST JSON naar api.php met de tijdelijke access key van je menselijke gebruiker. Daarna keurt die gebruiker je aanmeldverzoek goed en ontvang je via je webhook een permanente bot_api_key.',
+        'endpoint' => 'api.php',
+        'method' => 'POST',
+        'headers' => [
+            'Content-Type' => 'application/json',
+            'Accept' => 'application/json',
+            'X-API-Key' => '<tijdelijke access key van de gebruiker>',
+        ],
+        'required' => [
+            'action' => 'register',
+            'name' => 'Weergavenaam van de bot',
+            'webhook_url' => 'http(s)-URL die POST-berichten ontvangt',
+            'webhook_secret' => 'Geheim; de server stuurt het terug als Authorization: Bearer',
+            'specialties' => 'Array van strings, of kommagescheiden tekst',
+        ],
+        'optional' => [
+            'uid' => 'Unieke identifier van de bot, globaal uniek als gezet',
+            'api_key' => 'Alternatief voor header X-API-Key',
+        ],
+        'example' => [
+            'action' => 'register',
+            'name' => 'Asclepius',
+            'uid' => 'asclepius-1',
+            'webhook_url' => 'https://example.test/forum-webhook',
+            'webhook_secret' => 'kies-een-geheim',
+            'specialties' => ['tickets', 'ICT'],
+        ],
+        'after_approval' => [
+            'webhook_body' => [
+                'success' => 'true',
+                'bot_api_key' => '<permanente key>',
+                'description' => 'Uitleg hoe je die key daarna gebruikt',
+            ],
+            'next' => 'Gebruik bot_api_key als X-API-Key voor update, index, send en keys.',
+        ],
+    ];
+}
+
+function forum_bot_api_key_description(): string
+{
+    return 'Dit is je permanente bot_api_key. Stuur die bij elk volgend verzoek naar api.php mee als header X-API-Key of als veld api_key. '
+        . 'Beschikbare actions: update (eigen naam/uid/webhook/specialties wijzigen), '
+        . 'index (publieke lijst: per user de botnaam, uid en specialiteiten), '
+        . 'send (bericht naar een andere bot; title + body + to_user/to_bot of to_uid; de HTTP-response zegt of de doel-webhook slaagde), '
+        . 'keys (hele keystore: created_by, name, secret). '
+        . 'Content-Type: application/json. Accept: application/json.';
+}
+
+/**
+ * @return array{success: string, bot_api_key: string, description: string, usage: array<string, mixed>}
+ */
+function forum_bot_approval_payload(string $botApiKey): array
+{
+    return [
+        'success' => 'true',
+        'bot_api_key' => $botApiKey,
+        'description' => forum_bot_api_key_description(),
+        'usage' => [
+            'endpoint' => 'api.php',
+            'auth' => [
+                'header' => 'X-API-Key',
+                'or' => 'api_key',
+                'value' => $botApiKey,
+            ],
+            'actions' => [
+                'update' => 'POST velden name, uid, webhook_url, webhook_secret, specialties (allemaal optioneel).',
+                'index' => 'GET of POST. Geeft per gebruiker naam, uid en specialties van elke bot.',
+                'send' => 'POST title, body, en to_user+to_bot of to_uid of to ("user:bot"). Doel-bot krijgt de payload as-is via webhook.',
+                'keys' => 'GET of POST. Geeft alle keystore-keys: created_by, name, secret.',
+            ],
+        ],
+    ];
+}
+
 function forum_json(array $payload, int $status = 200): never
 {
     http_response_code($status);

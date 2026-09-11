@@ -1,5 +1,11 @@
 <?php
 
+require_once __DIR__ . '/functions.php';
+
+if (forum_request_wants_json() && strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'GET') {
+    forum_json(forum_registration_guide());
+}
+
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/logincheck.php';
 require_once __DIR__ . '/store.php';
@@ -36,7 +42,6 @@ $pendingCount = $store->countPendingRequests($sessionUser['email']);
             </div>
             <div class="top-actions">
                 <button type="button" id="accessKeyBtn">Access Key</button>
-                <button type="button" id="keystoreBtn">Keystore</button>
                 <button type="button" id="requestBtn" class="btn-requests<?= $pendingCount > 0 ? ' has-pending' : '' ?>">
                     Access Requests
                     <span class="count" id="requestCount"><?= (int) $pendingCount ?></span>
@@ -61,6 +66,35 @@ $pendingCount = $store->countPendingRequests($sessionUser['email']);
                 </div>
                 <div id="logList" class="log-list">
                     <div class="empty">Berichten worden geladen…</div>
+                </div>
+            </section>
+            <section class="panel keystore-panel">
+                <div class="panel-head">
+                    <h2>Keystore</h2>
+                    <span>Publiek voor iedereen met toegang — aanmaker, naam en secret</span>
+                </div>
+                <div class="keystore-create">
+                    <label class="field">Naam<input type="text" id="keyName" placeholder="bijv. bc-prod"></label>
+                    <label class="field">Secret<input type="text" id="keySecret" placeholder="secret"></label>
+                    <div class="inline-actions">
+                        <button type="button" id="keyGenerate">Genereer secret</button>
+                        <button type="button" class="btn-primary" id="keyCreate">Key aanmaken</button>
+                    </div>
+                </div>
+                <div class="keystore-table-wrap">
+                    <table class="keystore-table">
+                        <thead>
+                            <tr>
+                                <th>Aanmaker</th>
+                                <th>Naam</th>
+                                <th>Secret</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="keystoreBody">
+                            <tr><td colspan="4" class="empty">Keys worden geladen…</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </section>
         </main>
@@ -92,25 +126,6 @@ $pendingCount = $store->countPendingRequests($sessionUser['email']);
                 <button type="button" data-close>Sluiten</button>
             </header>
             <div class="body" id="requestsBody"></div>
-        </div>
-    </div>
-
-    <div class="modal-backdrop" id="keystoreModal">
-        <div class="modal" role="dialog" aria-labelledby="keystoreTitle">
-            <header>
-                <h3 id="keystoreTitle">Keystore</h3>
-                <button type="button" data-close>Sluiten</button>
-            </header>
-            <div class="body">
-                <p>Keys zijn globaal. Elke bot van elke gebruiker kan ze machine-readable ophalen.</p>
-                <label class="field">Naam<input type="text" id="keyName" placeholder="bijv. bc-prod"></label>
-                <label class="field">Secret<textarea id="keySecret" placeholder="secret"></textarea></label>
-                <div class="inline-actions">
-                    <button type="button" id="keyGenerate">Genereer secret</button>
-                    <button type="button" class="btn-primary" id="keyCreate">Key aanmaken</button>
-                </div>
-                <div id="keystoreBody" style="margin-top:16px;"></div>
-            </div>
         </div>
     </div>
 

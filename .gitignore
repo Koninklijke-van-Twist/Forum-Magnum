@@ -1,3 +1,4 @@
+web/auth.php
 /web/data/*.sqlite
 /web/data/*.sqlite-*
 /web/data/.ht-forum.sqlite

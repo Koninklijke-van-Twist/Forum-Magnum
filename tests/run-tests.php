@@ -75,7 +75,17 @@ forum_test('approve delivers bot_api_key via webhook', function () use ($store, 
     forum_assert(count($webhooks) === 1, 'Webhook werd niet precies één keer verstuurd.');
     forum_assert(($webhooks[0]['payload']['success'] ?? null) === 'true', 'success moet de string true zijn.');
     forum_assert(is_string($webhooks[0]['payload']['bot_api_key'] ?? null) && $webhooks[0]['payload']['bot_api_key'] !== '', 'bot_api_key ontbreekt.');
+    forum_assert(is_string($webhooks[0]['payload']['description'] ?? null) && str_contains((string) $webhooks[0]['payload']['description'], 'X-API-Key'), 'description bij API-key ontbreekt.');
     forum_assert($webhooks[0]['secret'] === 'secret-a', 'Webhook secret werd niet meegestuurd.');
+});
+
+forum_test('registration guide explains required register fields', function (): void {
+    $guide = forum_registration_guide();
+    forum_assert(($guide['purpose'] ?? '') === 'registration', 'purpose moet registration zijn.');
+    forum_assert(($guide['required']['action'] ?? '') === 'register', 'action=register ontbreekt.');
+    foreach (['name', 'webhook_url', 'webhook_secret', 'specialties'] as $field) {
+        forum_assert(isset($guide['required'][$field]), 'Verplicht veld ontbreekt: ' . $field);
+    }
 });
 
 forum_test('second user and bot can register independently', function () use ($store): void {
