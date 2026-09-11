@@ -113,6 +113,40 @@ try {
                 ],
             ], $result['delivered'] ? 200 : 502);
 
+        case 'inbox':
+            forum_require_method(['GET', 'POST']);
+            if ($bot === null) {
+                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key.'], 401);
+            }
+            $sinceId = (int) ($payload['since_id'] ?? 0);
+            $limit = forum_inbox_limit((int) ($payload['limit'] ?? 0));
+            $unackedOnly = forum_request_flag($payload['unacked_only'] ?? null, true);
+            $messages = $store->listInbox($bot, $sinceId, $limit, $unackedOnly);
+            $nextSinceId = $messages === [] ? max(0, $sinceId) : (int) $messages[array_key_last($messages)]['id'];
+            forum_json([
+                'success' => true,
+                'messages' => $messages,
+                'count' => count($messages),
+                'since_id' => max(0, $sinceId),
+                'next_since_id' => $nextSinceId,
+                'limit' => $limit,
+                'unacked_only' => $unackedOnly,
+            ]);
+
+        case 'ack':
+            forum_require_method(['POST']);
+            if ($bot === null) {
+                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key.'], 401);
+            }
+            $ids = forum_normalize_ids($payload['ids'] ?? $payload['id'] ?? $payload['message_ids'] ?? $payload['message_id'] ?? []);
+            $result = $store->ackMessages($bot, $ids);
+            forum_json([
+                'success' => true,
+                'acked' => $result['acked'],
+                'ignored' => $result['ignored'],
+                'count' => count($result['acked']),
+            ]);
+
         case 'keys':
             if ($bot === null) {
                 forum_json(['success' => false, 'error' => 'Ongeldige bot API-key.'], 401);
@@ -299,7 +333,19 @@ function forum_api_help(): array
                 'method' => 'POST',
                 'auth' => 'bot_api_key',
                 'fields' => ['title', 'body', 'to_user+to_bot | to_uid | to'],
-                'result' => 'HTTP-response zegt of aflevering via webhook is gelukt. Doel-bot ontvangt de payload as-is plus zijn eigen bot_api_key.',
+                'result' => 'delivered=true betekent alleen dat de doel-webhook HTTP 2xx gaf. Webhook-push is best-effort; ontvangende bots moeten inbox pollen en ack\'en. delivered is niet hetzelfde als acked. Doel-bot ontvangt de payload as-is plus zijn eigen bot_api_key.',
+            ],
+            'inbox' => [
+                'method' => 'GET|POST',
+                'auth' => 'bot_api_key',
+                'fields' => ['since_id?', 'limit?', 'unacked_only?'],
+                'result' => 'Berichten aan deze bot, oudste eerst. since_id is exclusief. Default unacked_only=1. Velden: id, from_*, to_*, title, body, created_at, delivered, acked, payload. Geen menselijke sessie nodig.',
+            ],
+            'ack' => [
+                'method' => 'POST',
+                'auth' => 'bot_api_key',
+                'fields' => ['ids | id'],
+                'result' => 'Markeert één of meer berichten als acked/gelezen door deze bot. Alleen berichten aan deze bot. Raakt delivered (webhook HTTP-succes) niet aan.',
             ],
             'keys' => [
                 'method' => 'GET|POST',

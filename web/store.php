@@ -99,10 +99,12 @@ class ForumStore
                 payload_json TEXT NOT NULL,
                 delivered INTEGER NOT NULL DEFAULT 0,
                 delivery_error TEXT NOT NULL DEFAULT "",
+                acked INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL
             )'
         );
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC)');
+        $this->ensureMessagesAckedColumn();
 
         $this->pdo->exec(
             'CREATE TABLE IF NOT EXISTS keystore (
@@ -115,6 +117,21 @@ class ForumStore
             )'
         );
         $this->ensureKeystoreUsernameColumn();
+    }
+
+    private function ensureMessagesAckedColumn(): void
+    {
+        $hasAcked = false;
+        foreach ($this->pdo->query('PRAGMA table_info(messages)') as $column) {
+            if (strtolower((string) ($column['name'] ?? '')) === 'acked') {
+                $hasAcked = true;
+                break;
+            }
+        }
+        if (!$hasAcked) {
+            $this->pdo->exec('ALTER TABLE messages ADD COLUMN acked INTEGER NOT NULL DEFAULT 0');
+        }
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_messages_inbox ON messages(to_user, to_bot, acked, id)');
     }
 
     private function ensureKeystoreUsernameColumn(): void
@@ -750,6 +767,99 @@ class ForumStore
     }
 
     /**
+     * Inbound messages for a bot, oldest first. Webhook `delivered` is independent of `acked`.
+     *
+     * @param array<string, mixed> $bot
+     * @return list<array<string, mixed>>
+     */
+    public function listInbox(array $bot, int $sinceId = 0, int $limit = 0, bool $unackedOnly = true): array
+    {
+        $limit = forum_inbox_limit($limit);
+        $sinceId = max(0, $sinceId);
+
+        $sql = 'SELECT * FROM messages
+                WHERE ' . $this->messageAddressedToBotClause() . '
+                  AND id > :since_id';
+        if ($unackedOnly) {
+            $sql .= ' AND acked = 0';
+        }
+        $sql .= ' ORDER BY id ASC LIMIT :limit';
+
+        $statement = $this->pdo->prepare($sql);
+        $this->bindBotAddress($statement, $bot);
+        $statement->bindValue(':since_id', $sinceId, PDO::PARAM_INT);
+        $statement->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $statement->execute();
+
+        return array_map(fn(array $row): array => $this->normalizeMessage($row, true), $statement->fetchAll());
+    }
+
+    /**
+     * Mark inbound messages as acknowledged by the receiving bot. Does not change `delivered`.
+     *
+     * @param array<string, mixed> $bot
+     * @param list<int|string> $ids
+     * @return array{acked: list<int>, ignored: list<int>}
+     */
+    public function ackMessages(array $bot, array $ids): array
+    {
+        $ids = forum_normalize_ids($ids);
+        if ($ids === []) {
+            throw new InvalidArgumentException('Geen geldige bericht-id\'s.');
+        }
+
+        $placeholders = [];
+        foreach ($ids as $index => $id) {
+            $placeholders[] = ':id' . $index;
+        }
+        $inList = implode(', ', $placeholders);
+
+        $select = $this->pdo->prepare(
+            'SELECT id FROM messages
+             WHERE id IN (' . $inList . ')
+               AND ' . $this->messageAddressedToBotClause()
+        );
+        foreach ($ids as $index => $id) {
+            $select->bindValue(':id' . $index, $id, PDO::PARAM_INT);
+        }
+        $this->bindBotAddress($select, $bot);
+        $select->execute();
+
+        $owned = [];
+        foreach ($select->fetchAll() as $row) {
+            $owned[] = (int) $row['id'];
+        }
+
+        if ($owned !== []) {
+            $ownedPlaceholders = [];
+            foreach ($owned as $index => $id) {
+                $ownedPlaceholders[] = ':oid' . $index;
+            }
+            $update = $this->pdo->prepare(
+                'UPDATE messages SET acked = 1
+                 WHERE id IN (' . implode(', ', $ownedPlaceholders) . ')'
+            );
+            foreach ($owned as $index => $id) {
+                $update->bindValue(':oid' . $index, $id, PDO::PARAM_INT);
+            }
+            $update->execute();
+        }
+
+        $ownedLookup = array_fill_keys($owned, true);
+        $ignored = [];
+        foreach ($ids as $id) {
+            if (!isset($ownedLookup[$id])) {
+                $ignored[] = $id;
+            }
+        }
+
+        return [
+            'acked' => $owned,
+            'ignored' => $ignored,
+        ];
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     public function getMessage(int $id): ?array
@@ -901,6 +1011,26 @@ class ForumStore
         }
 
         return $this->findBotByOwnerAndName($toUser, $toBot);
+    }
+
+    private function messageAddressedToBotClause(): string
+    {
+        return '(
+            (to_user = :to_user COLLATE NOCASE AND to_bot = :to_bot COLLATE NOCASE)
+            OR (:to_uid_check != "" AND to_uid = :to_uid)
+        )';
+    }
+
+    /**
+     * @param array<string, mixed> $bot
+     */
+    private function bindBotAddress(PDOStatement $statement, array $bot): void
+    {
+        $uid = (string) ($bot['uid'] ?? '');
+        $statement->bindValue(':to_user', (string) ($bot['owner_name'] ?? ''));
+        $statement->bindValue(':to_bot', (string) ($bot['name'] ?? ''));
+        $statement->bindValue(':to_uid_check', $uid);
+        $statement->bindValue(':to_uid', $uid);
     }
 
     /**
@@ -1082,7 +1212,7 @@ class ForumStore
      * @param array<string, mixed> $row
      * @return array<string, mixed>
      */
-    private function normalizeMessage(array $row): array
+    private function normalizeMessage(array $row, bool $includePayload = false): array
     {
         $fromUser = (string) ($row['from_user'] ?? '');
         $fromBot = (string) ($row['from_bot'] ?? '');
@@ -1090,7 +1220,7 @@ class ForumStore
         $toBot = (string) ($row['to_bot'] ?? '');
         $title = (string) ($row['title'] ?? '');
 
-        return [
+        $message = [
             'id' => (int) ($row['id'] ?? 0),
             'from_user' => $fromUser,
             'from_bot' => $fromBot,
@@ -1102,9 +1232,24 @@ class ForumStore
             'body' => (string) ($row['body'] ?? ''),
             'label' => forum_message_label($fromUser, $fromBot, $toUser, $toBot, $title),
             'delivered' => !empty($row['delivered']),
+            'acked' => !empty($row['acked']),
             'delivery_error' => (string) ($row['delivery_error'] ?? ''),
             'created_at' => (int) ($row['created_at'] ?? 0),
         ];
+
+        if ($includePayload) {
+            $payload = [];
+            $raw = $row['payload_json'] ?? '';
+            if (is_string($raw) && $raw !== '') {
+                $decoded = json_decode($raw, true);
+                if (is_array($decoded)) {
+                    $payload = $decoded;
+                }
+            }
+            $message['payload'] = $payload;
+        }
+
+        return $message;
     }
 
     /**

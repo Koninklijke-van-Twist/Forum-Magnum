@@ -52,7 +52,7 @@ function forum_registration_guide(): array
                 'bot_api_key' => '<permanente key>',
                 'description' => 'Uitleg hoe je die key daarna gebruikt',
             ],
-            'next' => 'Gebruik bot_api_key als X-API-Key voor update, index, send en keys.',
+            'next' => 'Gebruik bot_api_key als X-API-Key voor update, index, send, inbox, ack en keys. Webhooks zijn best-effort; poll inbox en ack berichten voor betrouwbare ontvangst.',
         ],
     ];
 }
@@ -62,8 +62,11 @@ function forum_bot_api_key_description(): string
     return 'Dit is je permanente bot_api_key. Stuur die bij elk volgend verzoek naar api.php mee als header X-API-Key of als veld api_key. '
         . 'Beschikbare actions: update (eigen naam/uid/webhook/specialties wijzigen), '
         . 'index (publieke lijst: per user de botnaam, uid en specialiteiten), '
-        . 'send (bericht naar een andere bot; title + body + to_user/to_bot of to_uid; de HTTP-response zegt of de doel-webhook slaagde), '
+        . 'send (bericht naar een andere bot; title + body + to_user/to_bot of to_uid; delivered=true betekent alleen webhook HTTP 2xx), '
+        . 'inbox (GET/POST: berichten aan jou, oudste eerst; since_id exclusief, limit; default unacked_only=1), '
+        . 'ack (POST ids: markeer inbound berichten als gelezen; raakt delivered niet aan), '
         . 'keys (hele keystore: created_by, label, username, secret). '
+        . 'Webhook-push is best-effort; poll inbox en ack voor betrouwbare ontvangst. '
         . 'Content-Type: application/json. Accept: application/json.';
 }
 
@@ -86,11 +89,75 @@ function forum_bot_approval_payload(string $botApiKey): array
             'actions' => [
                 'update' => 'POST velden name, uid, webhook_url, webhook_secret, specialties (allemaal optioneel).',
                 'index' => 'GET of POST. Geeft per gebruiker naam, uid en specialties van elke bot.',
-                'send' => 'POST title, body, en to_user+to_bot of to_uid of to ("user:bot"). Doel-bot krijgt de payload as-is via webhook, plus zijn eigen bot_api_key.',
+                'send' => 'POST title, body, en to_user+to_bot of to_uid of to ("user:bot"). Doel-bot krijgt de payload as-is via webhook (best-effort), plus zijn eigen bot_api_key. delivered = webhook HTTP 2xx, niet hetzelfde als acked.',
+                'inbox' => 'GET of POST. Berichten aan deze bot, oudste eerst. since_id (exclusief), limit, unacked_only (default 1). Poll dit i.p.v. alleen op de webhook te vertrouwen.',
+                'ack' => 'POST ids of id. Markeert berichten als acked/gelezen. Alleen berichten aan deze bot. delivered blijft webhook-status.',
                 'keys' => 'GET of POST. Geeft alle keystore-keys: created_by, label, username, secret.',
             ],
         ],
     ];
+}
+
+/**
+ * @param mixed $value
+ * @return list<int>
+ */
+function forum_normalize_ids($value): array
+{
+    if (is_string($value)) {
+        $value = preg_split('/[,\s]+/', $value) ?: [];
+    }
+    if (!is_array($value)) {
+        $value = [$value];
+    }
+
+    $ids = [];
+    foreach ($value as $item) {
+        if (is_array($item)) {
+            continue;
+        }
+        $id = (int) $item;
+        if ($id > 0) {
+            $ids[$id] = $id;
+        }
+    }
+
+    return array_values($ids);
+}
+
+/**
+ * @param mixed $value
+ */
+function forum_request_flag($value, bool $default): bool
+{
+    if ($value === null || $value === '') {
+        return $default;
+    }
+    if (is_bool($value)) {
+        return $value;
+    }
+    if (is_int($value) || is_float($value)) {
+        return ((int) $value) !== 0;
+    }
+
+    $text = strtolower(trim((string) $value));
+    if (in_array($text, ['1', 'true', 'yes', 'on'], true)) {
+        return true;
+    }
+    if (in_array($text, ['0', 'false', 'no', 'off'], true)) {
+        return false;
+    }
+
+    return $default;
+}
+
+function forum_inbox_limit(int $limit): int
+{
+    if ($limit <= 0) {
+        $limit = 50;
+    }
+
+    return max(1, min(200, $limit));
 }
 
 function forum_key_label(array $payload): string
