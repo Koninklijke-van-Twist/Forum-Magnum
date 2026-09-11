@@ -27,6 +27,69 @@ function forum_assert(bool $condition, string $message): void
     }
 }
 
+/**
+ * @param array<string, mixed> $params
+ * @return array{status: int, raw: string, json: array<string, mixed>|null}
+ */
+function forum_call_api(string $dbPath, string $method, array $params, string $apiKey = ''): array
+{
+    $script = tempnam(sys_get_temp_dir(), 'forum-api-');
+    if ($script === false) {
+        throw new RuntimeException('Kon API-testscript niet aanmaken.');
+    }
+
+    $config = var_export([
+        'db' => $dbPath,
+        'method' => strtoupper($method),
+        'params' => $params,
+        'api_key' => $apiKey,
+        'api' => dirname(__DIR__) . '/web/api.php',
+    ], true);
+
+    file_put_contents($script, <<<PHP
+<?php
+\$cfg = {$config};
+putenv('FORUM_DB_PATH=' . \$cfg['db']);
+\$_SERVER['REQUEST_METHOD'] = \$cfg['method'];
+\$_SERVER['HTTP_ACCEPT'] = 'application/json';
+if (\$cfg['api_key'] !== '') {
+    \$_SERVER['HTTP_X_API_KEY'] = \$cfg['api_key'];
+}
+if (\$cfg['method'] === 'GET') {
+    \$_GET = \$cfg['params'];
+    \$_POST = [];
+} else {
+    \$_GET = [];
+    \$_POST = \$cfg['params'];
+}
+\$_REQUEST = array_merge(\$_GET, \$_POST);
+register_shutdown_function(static function (): void {
+    echo "\\n<!--HTTP_STATUS:" . http_response_code() . "-->";
+});
+require \$cfg['api'];
+PHP
+    );
+
+    $output = [];
+    $exitCode = 0;
+    exec('php ' . escapeshellarg($script) . ' 2>&1', $output, $exitCode);
+    @unlink($script);
+
+    $raw = implode("\n", $output);
+    $status = $exitCode;
+    if (preg_match('/<!--HTTP_STATUS:(\d+)-->/', $raw, $match) === 1) {
+        $status = (int) $match[1];
+        $raw = trim(str_replace($match[0], '', $raw));
+    }
+    $decoded = json_decode($raw, true);
+
+    return [
+        'status' => $status,
+        'raw' => $raw,
+        'json' => is_array($decoded) ? $decoded : null,
+    ];
+}
+
 $tempDir = sys_get_temp_dir() . '/forum-magnum-tests-' . bin2hex(random_bytes(4));
 if (!@mkdir($tempDir, 0770, true) && !is_dir($tempDir)) {
     fwrite(STDERR, "Kon testdirectory niet aanmaken.\n");
@@ -153,6 +216,301 @@ forum_test('keystore is global and readable for bots', function () use ($store):
     $store->updateKey((int) $store->listKeys()[0]['id'], 'bc-prod', 'powerbiserv', 'rotated');
     $store->deleteKey((int) $store->listKeys()[0]['id']);
     forum_assert($store->listKeys() === [], 'Key is niet verwijderd.');
+});
+
+forum_test('inbox returns inbound messages oldest-first and ignores outbound', function () use ($store): void {
+    $sender = $store->findBotByUid('asclepius-1');
+    $target = $store->findBotByUid('mercurius-1');
+    forum_assert($sender !== null && $target !== null, 'Bots ontbreken.');
+
+    $first = $store->sendMessage($sender, [
+        'to_uid' => 'mercurius-1',
+        'title' => 'Eerste',
+        'body' => 'een',
+    ]);
+    $second = $store->sendMessage($sender, [
+        'to_uid' => 'mercurius-1',
+        'title' => 'Tweede',
+        'body' => 'twee',
+        'ticket' => 42,
+    ]);
+    $store->sendMessage($target, [
+        'to_uid' => 'asclepius-1',
+        'title' => 'Antwoord',
+        'body' => 'niet voor mercurius-inbox',
+    ]);
+
+    $inbox = $store->listInbox($target);
+    $titles = array_map(static fn(array $message): string => (string) $message['title'], $inbox);
+    forum_assert($titles === ['Openstaande post', 'Eerste', 'Tweede'], 'Inbox moet inbound oudste-eerst tonen.');
+    forum_assert(!in_array('Antwoord', $titles, true), 'Eigen outbound mag niet in inbox.');
+    $last = $inbox[array_key_last($inbox)];
+    forum_assert(($last['payload']['ticket'] ?? null) === 42, 'Payload moet meekomen in inbox.');
+    forum_assert($last['acked'] === false, 'Nieuw bericht moet unacked zijn.');
+    forum_assert($last['delivered'] === true, 'delivered blijft webhook-status.');
+    forum_assert((int) $last['id'] === (int) $second['message']['id'], 'Laatste inbox-id klopt niet.');
+
+    $paged = $store->listInbox($target, (int) $first['message']['id'], 10, true);
+    forum_assert(count($paged) === 1 && $paged[0]['title'] === 'Tweede', 'since_id moet exclusief zijn.');
+
+    $limited = $store->listInbox($target, 0, 1, true);
+    forum_assert(count($limited) === 1 && $limited[0]['title'] === 'Openstaande post', 'limit moet oudste eerst afkappen.');
+    forum_assert(forum_inbox_limit(999) === 200, 'limit-cap ontbreekt.');
+});
+
+forum_test('ack marks only the calling bot inbound messages', function () use ($store): void {
+    $sender = $store->findBotByUid('asclepius-1');
+    $target = $store->findBotByUid('mercurius-1');
+    forum_assert($sender !== null && $target !== null, 'Bots ontbreken.');
+
+    $inbox = $store->listInbox($target);
+    forum_assert($inbox !== [], 'Inbox hoort berichten te hebben.');
+    $firstId = (int) $inbox[0]['id'];
+    $secondId = (int) $inbox[1]['id'];
+
+    $result = $store->ackMessages($target, [$firstId, 999999]);
+    forum_assert($result['acked'] === [$firstId], 'Alleen eigen inbound mag acked worden.');
+    forum_assert($result['ignored'] === [999999], 'Onbekende id moet ignored zijn.');
+
+    $foreign = $store->ackMessages($sender, [$secondId]);
+    forum_assert($foreign['acked'] === [] && $foreign['ignored'] === [$secondId], 'Andere bot mag inbound van target niet acken.');
+
+    $remaining = $store->listInbox($target);
+    $remainingIds = array_map(static fn(array $message): int => (int) $message['id'], $remaining);
+    forum_assert(!in_array($firstId, $remainingIds, true), 'Geacked bericht moet uit default inbox verdwijnen.');
+    forum_assert(in_array($secondId, $remainingIds, true), 'Niet-geacked bericht moet blijven staan.');
+
+    $all = $store->listInbox($target, 0, 50, false);
+    $acked = null;
+    foreach ($all as $message) {
+        if ((int) $message['id'] === $firstId) {
+            $acked = $message;
+            break;
+        }
+    }
+    forum_assert($acked !== null && $acked['acked'] === true, 'acked-flag ontbreekt na ack.');
+    forum_assert($acked['delivered'] === true, 'ack mag delivered niet overschrijven.');
+
+    $again = $store->ackMessages($target, [$firstId]);
+    forum_assert($again['acked'] === [$firstId] && $again['ignored'] === [], 'Herkans-ack moet idempotent zijn.');
+});
+
+forum_test('undelivered webhook messages still appear in inbox', function () use ($tempDir): void {
+    $failStore = new ForumStore($tempDir . '/inbox-undelivered.sqlite');
+    $failStore->touchUser('cvrij@kvt.nl', 'Cees', 'access-inbox');
+    $failStore->touchUser('tfalken@kvt.nl', 'Tim Falken', 'access-inbox-tim');
+    $failStore->webhookSender = static function (): array {
+        return ['ok' => true, 'status' => 200, 'error' => '', 'body' => 'ok'];
+    };
+    $senderRequest = $failStore->upsertAccessRequest(
+        'tfalken@kvt.nl',
+        'Tim Falken',
+        'Hermes',
+        'hermes-1',
+        'https://example.test/hook-h',
+        'secret-h',
+        []
+    );
+    $targetRequest = $failStore->upsertAccessRequest(
+        'cvrij@kvt.nl',
+        'Cees',
+        'Elpis',
+        'elpis-inbox',
+        'https://example.test/hook-e2',
+        'secret-e2',
+        []
+    );
+    $failStore->approveRequest((int) $senderRequest['id'], 'tfalken@kvt.nl');
+    $failStore->approveRequest((int) $targetRequest['id'], 'cvrij@kvt.nl');
+    $failStore->webhookSender = static function (): array {
+        return ['ok' => false, 'status' => 200, 'error' => 'routine skipped', 'body' => ''];
+    };
+
+    $sender = $failStore->findBotByUid('hermes-1');
+    $target = $failStore->findBotByUid('elpis-inbox');
+    forum_assert($sender !== null && $target !== null, 'Inbox-bots ontbreken.');
+    $result = $failStore->sendMessage($sender, [
+        'to_uid' => 'elpis-inbox',
+        'title' => 'Toch bewaren',
+        'body' => 'webhook loog 2xx zonder routine',
+    ]);
+    forum_assert($result['delivered'] === false, 'Webhook had moeten falen.');
+    $inbox = $failStore->listInbox($target);
+    forum_assert(count($inbox) === 1, 'Undelivered bericht hoort in inbox.');
+    forum_assert($inbox[0]['delivered'] === false && $inbox[0]['acked'] === false, 'Flags kloppen niet voor undelivered inbox.');
+    forum_assert($inbox[0]['body'] === 'webhook loog 2xx zonder routine', 'Body ontbreekt in inbox.');
+});
+
+forum_test('existing messages table gets acked column', function () use ($tempDir): void {
+    $path = $tempDir . '/legacy-acked.sqlite';
+    $pdo = new PDO('sqlite:' . $path);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->exec(
+        'CREATE TABLE messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_user TEXT NOT NULL,
+            from_bot TEXT NOT NULL,
+            from_uid TEXT NOT NULL DEFAULT "",
+            to_user TEXT NOT NULL,
+            to_bot TEXT NOT NULL,
+            to_uid TEXT NOT NULL DEFAULT "",
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            delivered INTEGER NOT NULL DEFAULT 0,
+            delivery_error TEXT NOT NULL DEFAULT "",
+            created_at INTEGER NOT NULL
+        )'
+    );
+    $store = new ForumStore($path);
+    $hasAcked = false;
+    foreach ($store->pdo()->query('PRAGMA table_info(messages)') as $column) {
+        if (strtolower((string) ($column['name'] ?? '')) === 'acked') {
+            $hasAcked = true;
+            break;
+        }
+    }
+    forum_assert($hasAcked, 'acked-kolom ontbreekt na migrate.');
+});
+
+forum_test('help spec is machine-readable and includes inbox/ack', function () use ($dbPath): void {
+    $help = forum_call_api($dbPath, 'GET', ['action' => 'help']);
+    $spec = forum_call_api($dbPath, 'GET', ['action' => 'spec']);
+    forum_assert(($help['status'] ?? 0) === 200, 'help moet 200 zijn zonder auth.');
+    forum_assert(($spec['status'] ?? 0) === 200, 'spec moet 200 zijn zonder auth.');
+    forum_assert(($help['json']['spec_version'] ?? 0) === 1, 'spec_version ontbreekt.');
+    forum_assert(($spec['json']['spec_version'] ?? 0) === 1, 'spec-alias gaf geen zelfde document.');
+    forum_assert(($help['json']['endpoint']['path'] ?? '') === 'api.php', 'endpoint path ontbreekt.');
+    forum_assert(($help['json']['endpoint']['url_shape'] ?? '') === 'api.php?action={action}', 'url_shape ontbreekt.');
+    forum_assert(($help['json']['delivery']['webhooks'] ?? '') === 'best-effort', 'delivery.webhooks moet best-effort zijn.');
+    forum_assert(($help['json']['delivery']['reliable_source'] ?? '') === 'inbox', 'delivery.reliable_source moet inbox zijn.');
+    forum_assert(str_contains((string) ($help['json']['delivery']['temporary_api_keys'] ?? ''), 'api_key'), 'help moet tijdelijke API-keys in payloads documenteren.');
+    forum_assert(str_contains((string) ($help['json']['actions']['send']['result'] ?? ''), 'Temporary api_key'), 'send-spec moet recovery-keys noemen.');
+    forum_assert(isset($help['json']['auth']['roles']['bot_api_key'], $help['json']['auth']['roles']['user_access_key']), 'auth.roles ontbreekt.');
+    forum_assert(($help['json']['auth']['header'] ?? '') === 'X-API-Key', 'auth header ontbreekt.');
+
+    foreach (['help', 'spec', 'register', 'update', 'index', 'send', 'inbox', 'ack', 'keys'] as $name) {
+        forum_assert(isset($help['json']['actions'][$name]), 'spec mist action: ' . $name);
+        $action = $help['json']['actions'][$name];
+        forum_assert(isset($action['methods'], $action['auth'], $action['fields'], $action['response'], $action['errors']), 'action-shape incompleet: ' . $name);
+    }
+
+    $inbox = $help['json']['actions']['inbox'];
+    forum_assert($inbox['auth'] === 'bot_api_key' && $inbox['auth_required'] === true, 'inbox-auth klopt niet.');
+    forum_assert(in_array('GET', $inbox['methods'], true) && in_array('POST', $inbox['methods'], true), 'inbox-methods kloppen niet.');
+    $inboxFields = [];
+    foreach ($inbox['fields'] as $field) {
+        forum_assert(isset($field['name'], $field['type']) && array_key_exists('required', $field), 'inbox-field is niet schema-achtig.');
+        $inboxFields[] = (string) $field['name'];
+    }
+    foreach (['since_id', 'limit', 'unacked_only'] as $fieldName) {
+        forum_assert(in_array($fieldName, $inboxFields, true), 'inbox mist veld ' . $fieldName);
+    }
+
+    $ack = $help['json']['actions']['ack'];
+    forum_assert($ack['auth'] === 'bot_api_key' && in_array('POST', $ack['methods'], true), 'ack-spec klopt niet.');
+    forum_assert(str_contains((string) ($help['json']['actions']['send']['result'] ?? ''), 'best-effort'), 'send moet webhook als best-effort documenteren.');
+
+    $description = forum_bot_api_key_description();
+    forum_assert(str_contains($description, 'inbox') && str_contains($description, 'ack'), 'API-key description mist poll-actions.');
+    forum_assert(str_contains($description, 'help/spec'), 'API-key description mist help/spec.');
+    $guide = forum_registration_guide();
+    forum_assert(str_contains((string) ($guide['after_approval']['next'] ?? ''), 'inbox'), 'Registratiegids noemt inbox niet.');
+});
+
+forum_test('api inbox and ack require a bot key and succeed with one', function () use ($store, $dbPath): void {
+    $target = $store->findBotByUid('mercurius-1');
+    $sender = $store->findBotByUid('asclepius-1');
+    forum_assert($target !== null && $sender !== null, 'Bots ontbreken voor API-test.');
+
+    $unauth = forum_call_api($dbPath, 'GET', ['action' => 'inbox']);
+    forum_assert(($unauth['status'] ?? 0) === 401, 'inbox zonder key moet 401 zijn.');
+    forum_assert(($unauth['json']['error'] ?? '') === 'Ongeldige bot API-key.', 'inbox-authfout klopt niet.');
+
+    $badKey = forum_call_api($dbPath, 'GET', ['action' => 'inbox'], 'niet-geldig');
+    forum_assert(($badKey['status'] ?? 0) === 401, 'inbox met foute key moet 401 zijn.');
+
+    $ackGet = forum_call_api($dbPath, 'GET', ['action' => 'ack', 'id' => 1], (string) $target['bot_api_key']);
+    forum_assert(($ackGet['status'] ?? 0) === 405, 'ack via GET moet 405 zijn.');
+
+    $ackUnauth = forum_call_api($dbPath, 'POST', ['action' => 'ack', 'ids' => [1]]);
+    forum_assert(($ackUnauth['status'] ?? 0) === 401, 'ack zonder key moet 401 zijn.');
+
+    $sent = $store->sendMessage($sender, [
+        'to_uid' => 'mercurius-1',
+        'title' => 'API poll',
+        'body' => 'haal mij op',
+    ]);
+    $messageId = (int) $sent['message']['id'];
+
+    $inbox = forum_call_api($dbPath, 'GET', [
+        'action' => 'inbox',
+        'since_id' => $messageId - 1,
+        'limit' => 10,
+    ], (string) $target['bot_api_key']);
+    forum_assert(($inbox['status'] ?? 0) === 200, 'inbox met bot-key moet slagen.');
+    forum_assert(($inbox['json']['success'] ?? false) === true, 'inbox success ontbreekt.');
+    forum_assert(($inbox['json']['messages'][0]['id'] ?? 0) === $messageId, 'API-inbox miste het nieuwe bericht.');
+    forum_assert(($inbox['json']['messages'][0]['body'] ?? '') === 'haal mij op', 'API-inbox body ontbreekt.');
+
+    $ack = forum_call_api($dbPath, 'POST', [
+        'action' => 'ack',
+        'ids' => [$messageId],
+    ], (string) $target['bot_api_key']);
+    forum_assert(($ack['status'] ?? 0) === 200, 'ack met bot-key moet slagen.');
+    forum_assert(($ack['json']['acked'] ?? []) === [$messageId], 'API-ack gaf verkeerde ids terug.');
+
+    $empty = forum_call_api($dbPath, 'POST', [
+        'action' => 'inbox',
+        'unacked_only' => 1,
+        'since_id' => $messageId - 1,
+    ], (string) $target['bot_api_key']);
+    $emptyIds = array_map(
+        static fn(array $message): int => (int) $message['id'],
+        $empty['json']['messages'] ?? []
+    );
+    forum_assert(!in_array($messageId, $emptyIds, true), 'Geacked bericht bleef in API-inbox.');
+});
+
+forum_test('send keeps temporary API keys and strips only true secrets', function () use ($store, &$webhooks): void {
+    $sender = $store->findBotByUid('asclepius-1');
+    $target = $store->findBotByUid('mercurius-1');
+    forum_assert($sender !== null && $target !== null, 'Bots ontbreken.');
+    $replyKey = 'temp-reply-key-for-lost-keystore';
+
+    $webhooks = [];
+    $result = $store->sendMessage($sender, [
+        'to_uid' => 'mercurius-1',
+        'title' => 'Recovery key',
+        'body' => 'gebruik deze key om te antwoorden',
+        'extra' => 'blijft',
+        'bot_api_key' => $replyKey,
+        'api_key' => 'temp-api-key',
+        'webhook_secret' => 'should-not-leak',
+        'csrf' => 'csrf-token',
+        'password' => 'hunter2',
+        'authorization' => 'Bearer secret',
+    ]);
+    forum_assert($result['delivered'] === true, 'Send faalde.');
+
+    $row = $store->pdo()->prepare('SELECT payload_json FROM messages WHERE id = :id LIMIT 1');
+    $row->execute([':id' => (int) $result['message']['id']]);
+    $stored = json_decode((string) $row->fetchColumn(), true);
+    forum_assert(is_array($stored), 'payload_json ontbreekt.');
+    forum_assert(($stored['bot_api_key'] ?? null) === $replyKey, 'Tijdelijke bot_api_key moet in payload blijven.');
+    forum_assert(($stored['api_key'] ?? null) === 'temp-api-key', 'Tijdelijke api_key moet in payload blijven.');
+    foreach (['webhook_secret', 'csrf', 'password', 'authorization'] as $leaked) {
+        forum_assert(!array_key_exists($leaked, $stored), 'Opgeslagen payload lekt ' . $leaked);
+    }
+    forum_assert(($stored['extra'] ?? null) === 'blijft', 'Niet-gevoelige velden moeten blijven.');
+
+    $hook = $webhooks[0]['payload'] ?? [];
+    forum_assert(($hook['bot_api_key'] ?? null) === $replyKey, 'Tijdelijke bot_api_key moet in webhook blijven.');
+    forum_assert(($hook['api_key'] ?? null) === 'temp-api-key', 'Tijdelijke api_key moet in webhook blijven.');
+    foreach (['webhook_secret', 'csrf', 'password', 'authorization'] as $leaked) {
+        forum_assert(!array_key_exists($leaked, $hook), 'Webhook-payload lekt ' . $leaked);
+    }
+    forum_assert(($hook['extra'] ?? null) === 'blijft', 'Webhook verloor extra veld.');
 });
 
 forum_test('failed approval webhook keeps the request pending', function () use ($tempDir): void {

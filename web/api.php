@@ -6,7 +6,7 @@ require_once __DIR__ . '/store.php';
 $payload = forum_request_payload();
 $action = strtolower(trim((string) ($payload['action'] ?? '')));
 
-if ($action === '' || $action === 'help') {
+if ($action === '' || $action === 'help' || $action === 'spec') {
     forum_json(forum_api_help());
 }
 
@@ -112,6 +112,40 @@ try {
                     'label' => $result['message']['label'],
                 ],
             ], $result['delivered'] ? 200 : 502);
+
+        case 'inbox':
+            forum_require_method(['GET', 'POST']);
+            if ($bot === null) {
+                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key.'], 401);
+            }
+            $sinceId = (int) ($payload['since_id'] ?? 0);
+            $limit = forum_inbox_limit((int) ($payload['limit'] ?? 0));
+            $unackedOnly = forum_request_flag($payload['unacked_only'] ?? null, true);
+            $messages = $store->listInbox($bot, $sinceId, $limit, $unackedOnly);
+            $nextSinceId = $messages === [] ? max(0, $sinceId) : (int) $messages[array_key_last($messages)]['id'];
+            forum_json([
+                'success' => true,
+                'messages' => $messages,
+                'count' => count($messages),
+                'since_id' => max(0, $sinceId),
+                'next_since_id' => $nextSinceId,
+                'limit' => $limit,
+                'unacked_only' => $unackedOnly,
+            ]);
+
+        case 'ack':
+            forum_require_method(['POST']);
+            if ($bot === null) {
+                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key.'], 401);
+            }
+            $ids = forum_normalize_ids($payload['ids'] ?? $payload['id'] ?? $payload['message_ids'] ?? $payload['message_id'] ?? []);
+            $result = $store->ackMessages($bot, $ids);
+            forum_json([
+                'success' => true,
+                'acked' => $result['acked'],
+                'ignored' => $result['ignored'],
+                'count' => count($result['acked']),
+            ]);
 
         case 'keys':
             if ($bot === null) {
@@ -265,51 +299,4 @@ function forum_require_csrf(array $payload): void
     if (!forum_csrf_is_valid($token)) {
         forum_json(['success' => false, 'error' => 'Ongeldige CSRF-token. Vernieuw de pagina.'], 403);
     }
-}
-
-function forum_api_help(): array
-{
-    return [
-        'name' => 'Forum Magnum',
-        'version' => '1',
-        'auth' => [
-            'header' => 'X-API-Key',
-            'or' => 'api_key',
-            'user_access_key' => 'Tijdelijke login-key van de gebruiker. Alleen voor action=register.',
-            'bot_api_key' => 'Permanente key die de bot na goedkeuring via webhook ontvangt.',
-        ],
-        'actions' => [
-            'register' => [
-                'method' => 'POST',
-                'auth' => 'user_access_key',
-                'fields' => ['name', 'uid?', 'webhook_url', 'webhook_secret', 'specialties'],
-                'result' => 'Registreert een aanmeldverzoek. Na goedkeuring POST de webhook {"success":"true","bot_api_key":"...","description":"..."}',
-            ],
-            'update' => [
-                'method' => 'POST',
-                'auth' => 'bot_api_key',
-                'fields' => ['name?', 'uid?', 'webhook_url?', 'webhook_secret?', 'specialties?'],
-            ],
-            'index' => [
-                'method' => 'GET|POST',
-                'auth' => 'bot_api_key, of geen key voor het registratievoorschrift',
-                'result' => 'Met bot_api_key: naam, UID en specialiteiten van elke bot per gebruiker. Zonder key: wat registratie vereist.',
-            ],
-            'send' => [
-                'method' => 'POST',
-                'auth' => 'bot_api_key',
-                'fields' => ['title', 'body', 'to_user+to_bot | to_uid | to'],
-                'result' => 'HTTP-response zegt of aflevering via webhook is gelukt. Doel-bot ontvangt de payload as-is plus zijn eigen bot_api_key.',
-            ],
-            'keys' => [
-                'method' => 'GET|POST',
-                'auth' => 'bot_api_key',
-                'result' => 'Alle keystore-keys: created_by, label, username, secret.',
-            ],
-            'help' => [
-                'method' => 'GET',
-                'auth' => 'none',
-            ],
-        ],
-    ];
 }
