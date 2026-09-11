@@ -31,7 +31,7 @@ function forum_assert(bool $condition, string $message): void
  * @param array<string, mixed> $params
  * @return array{status: int, raw: string, json: array<string, mixed>|null}
  */
-function forum_call_api(string $dbPath, string $method, array $params, string $apiKey = ''): array
+function forum_call_api(string $dbPath, string $method, array $params, string $apiKey = '', array $sessionUser = []): array
 {
     $script = tempnam(sys_get_temp_dir(), 'forum-api-');
     if ($script === false) {
@@ -43,6 +43,7 @@ function forum_call_api(string $dbPath, string $method, array $params, string $a
         'method' => strtoupper($method),
         'params' => $params,
         'api_key' => $apiKey,
+        'session' => $sessionUser,
         'api' => dirname(__DIR__) . '/web/api.php',
     ], true);
 
@@ -54,6 +55,10 @@ putenv('FORUM_DB_PATH=' . \$cfg['db']);
 \$_SERVER['HTTP_ACCEPT'] = 'application/json';
 if (\$cfg['api_key'] !== '') {
     \$_SERVER['HTTP_X_API_KEY'] = \$cfg['api_key'];
+}
+if (\$cfg['session'] !== []) {
+    session_start();
+    \$_SESSION['user'] = \$cfg['session'];
 }
 if (\$cfg['method'] === 'GET') {
     \$_GET = \$cfg['params'];
@@ -149,6 +154,11 @@ forum_test('registration guide explains required register fields', function (): 
     foreach (['name', 'webhook_url', 'webhook_secret', 'specialties'] as $field) {
         forum_assert(isset($guide['required'][$field]), 'Verplicht veld ontbreekt: ' . $field);
     }
+    foreach (['owner_email', 'grok_agent_id'] as $field) {
+        forum_assert(isset($guide['optional'][$field]), 'Optioneel identity-veld ontbreekt: ' . $field);
+    }
+    forum_assert(isset($guide['identity']['owner_email'], $guide['after_approval']['ongoing_auth']), 'Registratiegids mist identity of ongoing_auth.');
+    forum_assert(str_contains((string) $guide['after_approval']['ongoing_auth'], 'webhook_secret'), 'ongoing_auth noemt webhook_secret niet.');
 });
 
 forum_test('second user and bot can register independently', function () use ($store): void {
@@ -170,7 +180,7 @@ forum_test('second user and bot can register independently', function () use ($s
         foreach ($user['bots'] as $bot) {
             forum_assert(!isset($bot['webhook_url']), 'Index mag geen webhook tonen.');
             forum_assert(!isset($bot['bot_api_key']), 'Index mag geen api-key tonen.');
-            forum_assert(isset($bot['name'], $bot['uid'], $bot['specialties']), 'Index mist verplichte velden.');
+            forum_assert(isset($bot['name'], $bot['uid'], $bot['grok_agent_id'], $bot['specialties']), 'Index mist verplichte velden.');
         }
     }
 });
@@ -416,8 +426,11 @@ forum_test('help spec is machine-readable and includes inbox/ack', function () u
     forum_assert(($help['json']['delivery']['reliable_source'] ?? '') === 'inbox', 'delivery.reliable_source moet inbox zijn.');
     forum_assert(str_contains((string) ($help['json']['delivery']['temporary_api_keys'] ?? ''), 'api_key'), 'help moet tijdelijke API-keys in payloads documenteren.');
     forum_assert(str_contains((string) ($help['json']['actions']['send']['result'] ?? ''), 'Temporary api_key'), 'send-spec moet recovery-keys noemen.');
-    forum_assert(isset($help['json']['auth']['roles']['bot_api_key'], $help['json']['auth']['roles']['user_access_key']), 'auth.roles ontbreekt.');
+    forum_assert(isset($help['json']['auth']['roles']['bot_api_key'], $help['json']['auth']['roles']['user_access_key'], $help['json']['auth']['roles']['webhook_secret']), 'auth.roles ontbreekt.');
     forum_assert(($help['json']['auth']['header'] ?? '') === 'X-API-Key', 'auth header ontbreekt.');
+    forum_assert(str_contains((string) ($help['json']['auth']['user_access_key'] ?? ''), 'Eenmalig'), 'help moet register als eenmalige access_key documenteren.');
+    forum_assert(str_contains((string) ($help['json']['auth']['webhook_secret'] ?? ''), 'uniek'), 'help moet webhook_secret-auth documenteren.');
+    forum_assert(isset($help['json']['auth']['identity']['owner_email'], $help['json']['auth']['identity']['grok_agent_id']), 'help mist identity-velden.');
 
     foreach (['help', 'spec', 'register', 'update', 'index', 'send', 'inbox', 'ack', 'keys'] as $name) {
         forum_assert(isset($help['json']['actions'][$name]), 'spec mist action: ' . $name);
@@ -426,7 +439,7 @@ forum_test('help spec is machine-readable and includes inbox/ack', function () u
     }
 
     $inbox = $help['json']['actions']['inbox'];
-    forum_assert($inbox['auth'] === 'bot_api_key' && $inbox['auth_required'] === true, 'inbox-auth klopt niet.');
+    forum_assert($inbox['auth'] === 'bot_api_key|webhook_secret' && $inbox['auth_required'] === true, 'inbox-auth klopt niet.');
     forum_assert(in_array('GET', $inbox['methods'], true) && in_array('POST', $inbox['methods'], true), 'inbox-methods kloppen niet.');
     $inboxFields = [];
     foreach ($inbox['fields'] as $field) {
@@ -438,7 +451,19 @@ forum_test('help spec is machine-readable and includes inbox/ack', function () u
     }
 
     $ack = $help['json']['actions']['ack'];
-    forum_assert($ack['auth'] === 'bot_api_key' && in_array('POST', $ack['methods'], true), 'ack-spec klopt niet.');
+    forum_assert($ack['auth'] === 'bot_api_key|webhook_secret' && in_array('POST', $ack['methods'], true), 'ack-spec klopt niet.');
+
+    $register = $help['json']['actions']['register'];
+    $registerFields = [];
+    foreach ($register['fields'] as $field) {
+        $registerFields[] = (string) $field['name'];
+    }
+    foreach (['owner_email', 'grok_agent_id'] as $fieldName) {
+        forum_assert(in_array($fieldName, $registerFields, true), 'register mist veld ' . $fieldName);
+    }
+    forum_assert($register['auth'] === 'user_access_key', 'register-auth moet user_access_key blijven.');
+    forum_assert(str_contains((string) ($register['result'] ?? ''), 'webhook_secret'), 'register-spec moet dual auth noemen.');
+    forum_assert(str_contains((string) ($help['json']['actions']['send']['auth'] ?? ''), 'webhook_secret'), 'send-auth moet dual auth zijn.');
     forum_assert(str_contains((string) ($help['json']['actions']['send']['result'] ?? ''), 'best-effort'), 'send moet webhook als best-effort documenteren.');
 
     $description = forum_bot_api_key_description();
@@ -455,7 +480,7 @@ forum_test('api inbox and ack require a bot key and succeed with one', function 
 
     $unauth = forum_call_api($dbPath, 'GET', ['action' => 'inbox']);
     forum_assert(($unauth['status'] ?? 0) === 401, 'inbox zonder key moet 401 zijn.');
-    forum_assert(($unauth['json']['error'] ?? '') === 'Ongeldige bot API-key.', 'inbox-authfout klopt niet.');
+    forum_assert(($unauth['json']['error'] ?? '') === 'Ongeldige bot API-key of webhook_secret.', 'inbox-authfout klopt niet.');
 
     $badKey = forum_call_api($dbPath, 'GET', ['action' => 'inbox'], 'niet-geldig');
     forum_assert(($badKey['status'] ?? 0) === 401, 'inbox met foute key moet 401 zijn.');
@@ -541,6 +566,231 @@ forum_test('send keeps temporary API keys and strips only true secrets', functio
         forum_assert(!array_key_exists($leaked, $hook), 'Webhook-payload lekt ' . $leaked);
     }
     forum_assert(($hook['extra'] ?? null) === 'blijft', 'Webhook verloor extra veld.');
+});
+
+forum_test('register stores grok_agent_id and copies it onto the bot', function () use ($store, $dbPath): void {
+    $response = forum_call_api($dbPath, 'POST', [
+        'action' => 'register',
+        'name' => 'Iris',
+        'uid' => 'iris-1',
+        'webhook_url' => 'https://example.test/hook-iris',
+        'webhook_secret' => 'secret-iris',
+        'specialties' => ['docs'],
+        'owner_email' => 'tfalken@kvt.nl',
+        'grok_agent_id' => 'bc-iris-agent',
+    ], 'access-tim');
+    forum_assert(($response['status'] ?? 0) === 201, 'register met grok_agent_id moet slagen.');
+    $requestId = (int) ($response['json']['request_id'] ?? 0);
+    $request = $store->getRequest($requestId);
+    forum_assert($request !== null && ($request['grok_agent_id'] ?? '') === 'bc-iris-agent', 'grok_agent_id ontbreekt op pending request.');
+    forum_assert(($request['owner_email'] ?? '') === 'tfalken@kvt.nl', 'owner_email ontbreekt op pending request.');
+
+    $approved = $store->approveRequest($requestId, 'tfalken@kvt.nl');
+    forum_assert($approved['bot'] !== null, 'Bot ontbreekt na goedkeuring met grok_agent_id.');
+    $bot = $store->findBotByUid('iris-1');
+    forum_assert($bot !== null && ($bot['grok_agent_id'] ?? '') === 'bc-iris-agent', 'grok_agent_id werd niet op de bot opgeslagen.');
+});
+
+forum_test('register rejects owner_email that does not match the access-key user', function () use ($dbPath, $store): void {
+    $before = $store->countPendingRequests('tfalken@kvt.nl');
+    $response = forum_call_api($dbPath, 'POST', [
+        'action' => 'register',
+        'name' => 'Impostor',
+        'uid' => 'impostor-1',
+        'webhook_url' => 'https://example.test/hook-imp',
+        'webhook_secret' => 'secret-imp',
+        'specialties' => ['x'],
+        'owner_email' => 'milanscheenloop@kvt.nl',
+    ], 'access-tim');
+    forum_assert(($response['status'] ?? 0) === 422, 'owner_email mismatch moet 422 zijn.');
+    forum_assert(
+        ($response['json']['error'] ?? '') === 'owner_email komt niet overeen met de gebruiker van deze access key.',
+        'owner_email mismatch-fout klopt niet.'
+    );
+    forum_assert($store->findBotByUid('impostor-1') === null, 'Mismatch mag geen bot aanmaken.');
+    forum_assert($store->countPendingRequests('tfalken@kvt.nl') === $before, 'Mismatch mag geen pending request maken.');
+});
+
+forum_test('register without owner_email uses the access-key user', function () use ($store, $dbPath): void {
+    $response = forum_call_api($dbPath, 'POST', [
+        'action' => 'register',
+        'name' => 'Nomad',
+        'uid' => 'nomad-1',
+        'webhook_url' => 'https://example.test/hook-nomad',
+        'webhook_secret' => 'secret-nomad',
+        'specialties' => [],
+    ], 'access-tim');
+    forum_assert(($response['status'] ?? 0) === 201, 'register zonder owner_email moet slagen.');
+    $request = $store->getRequest((int) ($response['json']['request_id'] ?? 0));
+    forum_assert($request !== null && ($request['owner_email'] ?? '') === 'tfalken@kvt.nl', 'owner_email moet van de access-key-gebruiker komen.');
+});
+
+forum_test('bot actions accept unique webhook_secret as credential', function () use ($store, $dbPath): void {
+    $target = $store->findBotByUid('mercurius-1');
+    $sender = $store->findBotByUid('iris-1');
+    forum_assert($target !== null && $sender !== null, 'Bots ontbreken voor webhook_secret-auth.');
+
+    $bySecret = $store->findBotByWebhookSecret('secret-m');
+    forum_assert($bySecret !== null && (int) $bySecret['id'] === (int) $target['id'], 'findBotByWebhookSecret moet de unieke bot vinden.');
+    forum_assert($store->findBotByCredential('secret-m') !== null, 'findBotByCredential moet webhook_secret accepteren.');
+
+    $sent = $store->sendMessage($sender, [
+        'to_uid' => 'mercurius-1',
+        'title' => 'Secret auth',
+        'body' => 'via webhook_secret',
+    ]);
+    $messageId = (int) $sent['message']['id'];
+
+    $inbox = forum_call_api($dbPath, 'GET', [
+        'action' => 'inbox',
+        'since_id' => $messageId - 1,
+        'limit' => 10,
+    ], 'secret-m');
+    forum_assert(($inbox['status'] ?? 0) === 200, 'inbox met webhook_secret moet slagen.');
+    forum_assert(($inbox['json']['messages'][0]['id'] ?? 0) === $messageId, 'inbox via webhook_secret miste het bericht.');
+
+    $ack = forum_call_api($dbPath, 'POST', [
+        'action' => 'ack',
+        'ids' => [$messageId],
+    ], 'secret-m');
+    forum_assert(($ack['status'] ?? 0) === 200 && ($ack['json']['acked'] ?? []) === [$messageId], 'ack via webhook_secret moet slagen.');
+
+    $keys = forum_call_api($dbPath, 'GET', ['action' => 'keys'], 'secret-m');
+    forum_assert(($keys['status'] ?? 0) === 200, 'keys via webhook_secret moet slagen.');
+
+    $index = forum_call_api($dbPath, 'GET', ['action' => 'index'], 'secret-iris');
+    forum_assert(($index['status'] ?? 0) === 200 && isset($index['json']['users']), 'index via webhook_secret moet slagen.');
+
+    $bodyAuth = forum_call_api($dbPath, 'GET', [
+        'action' => 'inbox',
+        'unacked_only' => 0,
+        'limit' => 1,
+        'webhook_secret' => 'secret-iris',
+    ]);
+    forum_assert(($bodyAuth['status'] ?? 0) === 200, 'inbox met webhook_secret-veld moet slagen.');
+
+    $updated = forum_call_api($dbPath, 'POST', [
+        'action' => 'update',
+        'specialties' => ['docs', 'auth'],
+    ], 'secret-iris');
+    forum_assert(($updated['status'] ?? 0) === 200, 'update via webhook_secret moet slagen.');
+    forum_assert(($updated['json']['bot']['specialties'] ?? []) === ['docs', 'auth'], 'update via webhook_secret wijzigde specialties niet.');
+    forum_assert(($updated['json']['bot']['grok_agent_id'] ?? '') === 'bc-iris-agent', 'update-response mist grok_agent_id.');
+});
+
+forum_test('duplicate webhook_secret does not resolve a bot', function () use ($store, $dbPath): void {
+    $iris = $store->findBotByUid('iris-1');
+    forum_assert($iris !== null, 'Iris ontbreekt.');
+    $store->updateBot((int) $iris['id'], ['webhook_secret' => 'secret-m']);
+    forum_assert($store->findBotByWebhookSecret('secret-m') === null, 'Dubbel secret mag geen bot opleveren.');
+    $denied = forum_call_api($dbPath, 'GET', ['action' => 'inbox'], 'secret-m');
+    forum_assert(($denied['status'] ?? 0) === 401, 'inbox met dubbel webhook_secret moet 401 zijn.');
+    $store->updateBot((int) $iris['id'], ['webhook_secret' => 'secret-iris']);
+    forum_assert($store->findBotByWebhookSecret('secret-iris') !== null, 'Uniek secret moet weer werken.');
+});
+
+forum_test('state API and UI show owner email plus bot identity', function () use ($store, $dbPath): void {
+    $listed = $store->listBotsForOwner('tfalken@kvt.nl');
+    $iris = null;
+    foreach ($listed as $bot) {
+        if (($bot['uid'] ?? '') === 'iris-1') {
+            $iris = $bot;
+            break;
+        }
+    }
+    forum_assert($iris !== null, 'Iris ontbreekt in owner-lijst.');
+    foreach (['owner_email', 'name', 'uid', 'grok_agent_id'] as $field) {
+        forum_assert(array_key_exists($field, $iris), 'owner-lijst mist ' . $field);
+    }
+    forum_assert($iris['owner_email'] === 'tfalken@kvt.nl', 'owner_email in state-feed klopt niet.');
+    forum_assert($iris['name'] === 'Iris' && $iris['uid'] === 'iris-1' && $iris['grok_agent_id'] === 'bc-iris-agent', 'bot-identiteit in state-feed klopt niet.');
+
+    $pending = $store->listPendingRequests('tfalken@kvt.nl');
+    $nomad = null;
+    foreach ($pending as $request) {
+        if (($request['uid'] ?? '') === 'nomad-1') {
+            $nomad = $request;
+            break;
+        }
+    }
+    forum_assert($nomad !== null, 'Nomad-pending ontbreekt.');
+    foreach (['owner_email', 'name', 'uid', 'grok_agent_id'] as $field) {
+        forum_assert(array_key_exists($field, $nomad), 'pending request mist ' . $field);
+    }
+    forum_assert($nomad['owner_email'] === 'tfalken@kvt.nl' && $nomad['name'] === 'Nomad', 'pending identity klopt niet.');
+
+    $state = forum_call_api($dbPath, 'GET', ['action' => 'state'], '', [
+        'email' => 'tfalken@kvt.nl',
+        'name' => 'Tim Falken',
+        'api_key' => 'access-tim',
+        'oid' => 'tim',
+    ]);
+    forum_assert(($state['status'] ?? 0) === 200, 'state moet 200 zijn met sessie.');
+    $stateIris = null;
+    foreach ($state['json']['bots'] ?? [] as $bot) {
+        if (($bot['uid'] ?? '') === 'iris-1') {
+            $stateIris = $bot;
+            break;
+        }
+    }
+    forum_assert($stateIris !== null, 'state mist Iris.');
+    forum_assert(($stateIris['owner_email'] ?? '') === 'tfalken@kvt.nl', 'state mist owner_email.');
+    forum_assert(($stateIris['grok_agent_id'] ?? '') === 'bc-iris-agent', 'state mist grok_agent_id.');
+
+    $js = (string) file_get_contents(dirname(__DIR__) . '/web/app.js');
+    forum_assert(str_contains($js, 'function identityMeta'), 'UI mist identityMeta.');
+    forum_assert(str_contains($js, 'owner_email'), 'UI toont owner_email niet.');
+    forum_assert(str_contains($js, 'grok_agent_id'), 'UI toont grok_agent_id niet.');
+    forum_assert(str_contains($js, 'Eigenaar:'), 'UI labelt eigenaar niet.');
+    forum_assert(str_contains($js, 'Grok-agent:'), 'UI labelt grok_agent_id niet.');
+});
+
+forum_test('legacy bots table gets grok_agent_id column', function () use ($tempDir): void {
+    $path = $tempDir . '/legacy-grok-agent.sqlite';
+    $pdo = new PDO('sqlite:' . $path);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->exec(
+        'CREATE TABLE bots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_email TEXT NOT NULL,
+            owner_name TEXT NOT NULL,
+            name TEXT NOT NULL,
+            uid TEXT NOT NULL DEFAULT "",
+            webhook_url TEXT NOT NULL,
+            webhook_secret TEXT NOT NULL,
+            specialties_json TEXT NOT NULL DEFAULT "[]",
+            bot_api_key TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )'
+    );
+    $pdo->exec(
+        'CREATE TABLE access_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_email TEXT NOT NULL,
+            owner_name TEXT NOT NULL,
+            name TEXT NOT NULL,
+            uid TEXT NOT NULL DEFAULT "",
+            webhook_url TEXT NOT NULL,
+            webhook_secret TEXT NOT NULL,
+            specialties_json TEXT NOT NULL DEFAULT "[]",
+            status TEXT NOT NULL DEFAULT "pending",
+            created_at INTEGER NOT NULL,
+            decided_at INTEGER,
+            error TEXT NOT NULL DEFAULT ""
+        )'
+    );
+    $store = new ForumStore($path);
+    foreach (['bots', 'access_requests'] as $table) {
+        $hasColumn = false;
+        foreach ($store->pdo()->query('PRAGMA table_info(' . $table . ')') as $column) {
+            if (strtolower((string) ($column['name'] ?? '')) === 'grok_agent_id') {
+                $hasColumn = true;
+                break;
+            }
+        }
+        forum_assert($hasColumn, 'grok_agent_id ontbreekt na migrate op ' . $table);
+    }
 });
 
 forum_test('failed approval webhook keeps the request pending', function () use ($tempDir): void {

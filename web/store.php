@@ -56,6 +56,7 @@ class ForumStore
                 webhook_url TEXT NOT NULL,
                 webhook_secret TEXT NOT NULL,
                 specialties_json TEXT NOT NULL DEFAULT "[]",
+                grok_agent_id TEXT NOT NULL DEFAULT "",
                 bot_api_key TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
@@ -64,6 +65,7 @@ class ForumStore
         $this->pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_api_key ON bots(bot_api_key)');
         $this->pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_uid ON bots(uid) WHERE uid != ""');
         $this->pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_owner_name ON bots(owner_email, name COLLATE NOCASE)');
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_bots_webhook_secret ON bots(webhook_secret)');
 
         $this->pdo->exec(
             'CREATE TABLE IF NOT EXISTS access_requests (
@@ -75,6 +77,7 @@ class ForumStore
                 webhook_url TEXT NOT NULL,
                 webhook_secret TEXT NOT NULL,
                 specialties_json TEXT NOT NULL DEFAULT "[]",
+                grok_agent_id TEXT NOT NULL DEFAULT "",
                 status TEXT NOT NULL DEFAULT "pending",
                 created_at INTEGER NOT NULL,
                 decided_at INTEGER,
@@ -105,6 +108,7 @@ class ForumStore
         );
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC)');
         $this->ensureMessagesAckedColumn();
+        $this->ensureGrokAgentIdColumns();
 
         $this->pdo->exec(
             'CREATE TABLE IF NOT EXISTS keystore (
@@ -145,6 +149,26 @@ class ForumStore
         }
         if (!$hasUsername) {
             $this->pdo->exec('ALTER TABLE keystore ADD COLUMN username TEXT NOT NULL DEFAULT ""');
+        }
+    }
+
+    private function ensureGrokAgentIdColumns(): void
+    {
+        $this->ensureTextColumn('bots', 'grok_agent_id');
+        $this->ensureTextColumn('access_requests', 'grok_agent_id');
+    }
+
+    private function ensureTextColumn(string $table, string $column): void
+    {
+        $hasColumn = false;
+        foreach ($this->pdo->query('PRAGMA table_info(' . $table . ')') as $info) {
+            if (strtolower((string) ($info['name'] ?? '')) === strtolower($column)) {
+                $hasColumn = true;
+                break;
+            }
+        }
+        if (!$hasColumn) {
+            $this->pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' TEXT NOT NULL DEFAULT ""');
         }
     }
 
@@ -243,11 +267,13 @@ class ForumStore
         string $uid,
         string $webhookUrl,
         string $webhookSecret,
-        array $specialties
+        array $specialties,
+        string $grokAgentId = ''
     ): array {
         $ownerEmail = strtolower(trim($ownerEmail));
         $name = trim($name);
         $uid = trim($uid);
+        $grokAgentId = trim($grokAgentId);
         if ($ownerEmail === '' || $name === '') {
             throw new InvalidArgumentException('Naam van bot en eigenaar zijn verplicht.');
         }
@@ -267,6 +293,7 @@ class ForumStore
                      webhook_url = :webhook_url,
                      webhook_secret = :webhook_secret,
                      specialties_json = :specialties_json,
+                     grok_agent_id = :grok_agent_id,
                      error = "",
                      created_at = :created_at
                  WHERE id = :id'
@@ -278,6 +305,7 @@ class ForumStore
                 ':webhook_url' => $webhookUrl,
                 ':webhook_secret' => $webhookSecret,
                 ':specialties_json' => $specialtiesJson,
+                ':grok_agent_id' => $grokAgentId,
                 ':created_at' => $now,
                 ':id' => (int) $existing['id'],
             ]);
@@ -286,10 +314,10 @@ class ForumStore
             $statement = $this->pdo->prepare(
                 'INSERT INTO access_requests (
                     owner_email, owner_name, name, uid, webhook_url, webhook_secret,
-                    specialties_json, status, created_at, decided_at, error
+                    specialties_json, grok_agent_id, status, created_at, decided_at, error
                  ) VALUES (
                     :owner_email, :owner_name, :name, :uid, :webhook_url, :webhook_secret,
-                    :specialties_json, "pending", :created_at, NULL, ""
+                    :specialties_json, :grok_agent_id, "pending", :created_at, NULL, ""
                  )'
             );
             $statement->execute([
@@ -300,6 +328,7 @@ class ForumStore
                 ':webhook_url' => $webhookUrl,
                 ':webhook_secret' => $webhookSecret,
                 ':specialties_json' => $specialtiesJson,
+                ':grok_agent_id' => $grokAgentId,
                 ':created_at' => $now,
             ]);
             $request = $this->getRequest((int) $this->pdo->lastInsertId());
@@ -379,10 +408,10 @@ class ForumStore
             $insert = $this->pdo->prepare(
                 'INSERT INTO bots (
                     owner_email, owner_name, name, uid, webhook_url, webhook_secret,
-                    specialties_json, bot_api_key, created_at, updated_at
+                    specialties_json, grok_agent_id, bot_api_key, created_at, updated_at
                  ) VALUES (
                     :owner_email, :owner_name, :name, :uid, :webhook_url, :webhook_secret,
-                    :specialties_json, :bot_api_key, :created_at, :updated_at
+                    :specialties_json, :grok_agent_id, :bot_api_key, :created_at, :updated_at
                  )'
             );
             $insert->execute([
@@ -393,6 +422,7 @@ class ForumStore
                 ':webhook_url' => $request['webhook_url'],
                 ':webhook_secret' => $webhookSecret,
                 ':specialties_json' => forum_specialties_json($request['specialties']),
+                ':grok_agent_id' => (string) ($request['grok_agent_id'] ?? ''),
                 ':bot_api_key' => $botApiKey,
                 ':created_at' => $now,
                 ':updated_at' => $now,
@@ -515,6 +545,48 @@ class ForumStore
     }
 
     /**
+     * Resolve a bot by the registered webhook_secret. Only succeeds when that secret is unique.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findBotByWebhookSecret(string $secret): ?array
+    {
+        $secret = (string) $secret;
+        if (trim($secret) === '') {
+            return null;
+        }
+
+        $statement = $this->pdo->prepare('SELECT * FROM bots WHERE webhook_secret = :secret');
+        $statement->execute([':secret' => $secret]);
+        $rows = $statement->fetchAll();
+        if (count($rows) !== 1) {
+            return null;
+        }
+
+        return $this->normalizeBot($rows[0]);
+    }
+
+    /**
+     * bot_api_key wins when both match; otherwise a unique webhook_secret is enough.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findBotByCredential(string $credential): ?array
+    {
+        $credential = (string) $credential;
+        if (trim($credential) === '') {
+            return null;
+        }
+
+        $bot = $this->findBotByApiKey($credential);
+        if ($bot !== null) {
+            return $bot;
+        }
+
+        return $this->findBotByWebhookSecret($credential);
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     public function findBotByUid(string $uid): ?array
@@ -571,6 +643,9 @@ class ForumStore
         $uid = array_key_exists('uid', $fields) ? trim((string) $fields['uid']) : (string) $bot['uid'];
         $webhookUrl = array_key_exists('webhook_url', $fields) ? trim((string) $fields['webhook_url']) : (string) $bot['webhook_url'];
         $webhookSecret = array_key_exists('webhook_secret', $fields) ? (string) $fields['webhook_secret'] : (string) $bot['webhook_secret'];
+        $grokAgentId = array_key_exists('grok_agent_id', $fields)
+            ? trim((string) $fields['grok_agent_id'])
+            : (string) $bot['grok_agent_id'];
         $specialties = array_key_exists('specialties', $fields)
             ? forum_normalize_specialties($fields['specialties'])
             : $bot['specialties'];
@@ -592,6 +667,7 @@ class ForumStore
                  webhook_url = :webhook_url,
                  webhook_secret = :webhook_secret,
                  specialties_json = :specialties_json,
+                 grok_agent_id = :grok_agent_id,
                  updated_at = :updated_at
              WHERE id = :id'
         );
@@ -601,6 +677,7 @@ class ForumStore
             ':webhook_url' => $webhookUrl,
             ':webhook_secret' => $webhookSecret,
             ':specialties_json' => forum_specialties_json($specialties),
+            ':grok_agent_id' => $grokAgentId,
             ':updated_at' => forum_now(),
             ':id' => $id,
         ]);
@@ -631,12 +708,12 @@ class ForumStore
     }
 
     /**
-     * @return list<array{name: string, bots: list<array{name: string, uid: string, specialties: list<string>}>}>
+     * @return list<array{name: string, bots: list<array{name: string, uid: string, grok_agent_id: string, specialties: list<string>}>}>
      */
     public function publicIndex(): array
     {
         $statement = $this->pdo->query(
-            'SELECT owner_name, owner_email, name, uid, specialties_json
+            'SELECT owner_name, owner_email, name, uid, grok_agent_id, specialties_json
              FROM bots
              ORDER BY owner_name COLLATE NOCASE ASC, name COLLATE NOCASE ASC, id ASC'
         );
@@ -654,6 +731,7 @@ class ForumStore
             $grouped[$groupKey]['bots'][] = [
                 'name' => (string) ($row['name'] ?? ''),
                 'uid' => (string) ($row['uid'] ?? ''),
+                'grok_agent_id' => (string) ($row['grok_agent_id'] ?? ''),
                 'specialties' => forum_normalize_specialties($row['specialties_json'] ?? []),
             ];
         }
@@ -1173,6 +1251,7 @@ class ForumStore
             'webhook_url' => (string) ($row['webhook_url'] ?? ''),
             'webhook_secret' => (string) ($row['webhook_secret'] ?? ''),
             'specialties' => forum_normalize_specialties($row['specialties_json'] ?? []),
+            'grok_agent_id' => (string) ($row['grok_agent_id'] ?? ''),
             'bot_api_key' => (string) ($row['bot_api_key'] ?? ''),
             'created_at' => (int) ($row['created_at'] ?? 0),
             'updated_at' => (int) ($row['updated_at'] ?? 0),
@@ -1189,6 +1268,7 @@ class ForumStore
             'id' => (int) ($bot['id'] ?? 0),
             'name' => (string) ($bot['name'] ?? ''),
             'uid' => (string) ($bot['uid'] ?? ''),
+            'grok_agent_id' => (string) ($bot['grok_agent_id'] ?? ''),
             'specialties' => forum_normalize_specialties($bot['specialties'] ?? []),
             'webhook_url' => (string) ($bot['webhook_url'] ?? ''),
             'created_at' => (int) ($bot['created_at'] ?? 0),
@@ -1217,6 +1297,7 @@ class ForumStore
             'uid' => (string) ($row['uid'] ?? ''),
             'webhook_url' => (string) ($row['webhook_url'] ?? ''),
             'specialties' => forum_normalize_specialties($row['specialties_json'] ?? []),
+            'grok_agent_id' => (string) ($row['grok_agent_id'] ?? ''),
             'status' => (string) ($row['status'] ?? 'pending'),
             'created_at' => (int) ($row['created_at'] ?? 0),
             'decided_at' => isset($row['decided_at']) && $row['decided_at'] !== null ? (int) $row['decided_at'] : null,
