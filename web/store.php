@@ -667,8 +667,7 @@ class ForumStore
             $bodyText = (string) $body;
         }
 
-        $outbound = $payload;
-        unset($outbound['api_key'], $outbound['action'], $outbound['csrf']);
+        $outbound = forum_strip_sensitive_fields($payload);
         $outbound['from_user'] = (string) $fromBot['owner_name'];
         $outbound['from_bot'] = (string) $fromBot['name'];
         $outbound['from_uid'] = (string) $fromBot['uid'];

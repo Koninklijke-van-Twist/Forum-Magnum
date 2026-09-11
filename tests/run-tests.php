@@ -470,6 +470,48 @@ forum_test('api inbox and ack require a bot key and succeed with one', function 
     forum_assert(!in_array($messageId, $emptyIds, true), 'Geacked bericht bleef in API-inbox.');
 });
 
+forum_test('send strips sender bot_api_key from stored and webhook payload', function () use ($store, &$webhooks): void {
+    $sender = $store->findBotByUid('asclepius-1');
+    $target = $store->findBotByUid('mercurius-1');
+    forum_assert($sender !== null && $target !== null, 'Bots ontbreken.');
+    $senderKey = (string) $sender['bot_api_key'];
+    $targetKey = (string) $target['bot_api_key'];
+    forum_assert($senderKey !== '' && $senderKey !== $targetKey, 'Testkeys zijn niet te onderscheiden.');
+
+    $webhooks = [];
+    $result = $store->sendMessage($sender, [
+        'to_uid' => 'mercurius-1',
+        'title' => 'Niet lekken',
+        'body' => 'gewone body',
+        'extra' => 'blijft',
+        'bot_api_key' => $senderKey,
+        'api_key' => 'sender-api-key',
+        'webhook_secret' => 'should-not-leak',
+        'webhook_url' => 'https://evil.example/hook',
+        'password' => 'hunter2',
+        'access_token' => 'tok',
+    ]);
+    forum_assert($result['delivered'] === true, 'Send faalde.');
+
+    $row = $store->pdo()->prepare('SELECT payload_json FROM messages WHERE id = :id LIMIT 1');
+    $row->execute([':id' => (int) $result['message']['id']]);
+    $stored = json_decode((string) $row->fetchColumn(), true);
+    forum_assert(is_array($stored), 'payload_json ontbreekt.');
+    foreach (['bot_api_key', 'api_key', 'webhook_secret', 'webhook_url', 'password', 'access_token'] as $leaked) {
+        forum_assert(!array_key_exists($leaked, $stored), 'Opgeslagen payload lekt ' . $leaked);
+    }
+    forum_assert(($stored['extra'] ?? null) === 'blijft', 'Niet-gevoelige velden moeten blijven.');
+    forum_assert(($stored['title'] ?? '') === 'Niet lekken', 'Titel verdween bij strip.');
+
+    $hook = $webhooks[0]['payload'] ?? [];
+    forum_assert(($hook['bot_api_key'] ?? null) !== $senderKey, 'Sender bot_api_key lekte naar webhook.');
+    forum_assert(($hook['bot_api_key'] ?? '') === $targetKey, 'Webhook moet de doel-bot key houden.');
+    foreach (['api_key', 'webhook_secret', 'webhook_url', 'password', 'access_token'] as $leaked) {
+        forum_assert(!array_key_exists($leaked, $hook), 'Webhook-payload lekt ' . $leaked);
+    }
+    forum_assert(($hook['extra'] ?? null) === 'blijft', 'Webhook verloor extra veld.');
+});
+
 forum_test('failed approval webhook keeps the request pending', function () use ($tempDir): void {
     $failStore = new ForumStore($tempDir . '/fail.sqlite');
     $failStore->touchUser('cvrij@kvt.nl', 'Cees', 'access-cees');

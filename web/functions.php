@@ -290,7 +290,7 @@ function forum_api_help(): array
                     ['status' => 422, 'when' => 'missing title or unknown target'],
                     ['status' => 502, 'when' => 'webhook was not HTTP 2xx; message is still stored for inbox'],
                 ],
-                'Stores the message and best-effort POSTs it to the target webhook. delivered=true means webhook HTTP 2xx only. The peer must poll inbox for a reliable copy.'
+                'Stores the message and best-effort POSTs it to the target webhook. delivered=true means webhook HTTP 2xx only. The peer must poll inbox for a reliable copy. Sensitive keys (api_key, bot_api_key, webhook_secret, webhook_url, csrf, password, token, ...) are stripped before store/webhook; title, body and routing stay.'
             ),
             'inbox' => forum_spec_action(
                 ['GET', 'POST'],
@@ -598,6 +598,51 @@ function forum_inbox_limit(int $limit): int
     }
 
     return max(1, min(200, $limit));
+}
+
+function forum_is_sensitive_payload_key(string $key): bool
+{
+    $name = strtolower(trim($key));
+    if ($name === '') {
+        return false;
+    }
+
+    $exact = [
+        'action',
+        'api_key',
+        'bot_api_key',
+        'webhook_secret',
+        'webhook_url',
+        'webhook',
+        'access_key',
+        'csrf',
+        'csrf_token',
+        'authorization',
+        'secret',
+        'password',
+        'token',
+    ];
+    if (in_array($name, $exact, true)) {
+        return true;
+    }
+
+    return preg_match('/secret|token|password|authorization/i', $name) === 1;
+}
+
+/**
+ * @param array<string, mixed> $payload
+ * @return array<string, mixed>
+ */
+function forum_strip_sensitive_fields(array $payload): array
+{
+    $clean = [];
+    foreach ($payload as $key => $value) {
+        if (forum_is_sensitive_payload_key((string) $key)) {
+            continue;
+        }
+        $clean[$key] = $value;
+    }
+    return $clean;
 }
 
 function forum_key_label(array $payload): string
