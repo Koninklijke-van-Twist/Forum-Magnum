@@ -21,6 +21,9 @@ if ($sessionUser !== null && $sessionUser['api_key'] !== '') {
 
 $bot = $apiKey !== '' ? $store->findBotByCredential($apiKey) : null;
 $accessUser = ($bot === null && $apiKey !== '') ? $store->findUserByAccessKey($apiKey) : null;
+if ($bot === null && $apiKey === '' && forum_request_has_ssh_auth()) {
+    $bot = forum_authenticate_ssh_bot($store, $payload);
+}
 
 try {
     switch ($action) {
@@ -184,6 +187,7 @@ try {
                 'pending_count' => $store->countPendingRequests($user['email']),
                 'messages' => $store->listMessages(200, $filterBotId > 0 ? $filterBotId : null),
                 'keys' => $store->listKeys(),
+                'ssh_keys' => $store->listSshKeysForOwner($user['email']),
             ]);
 
         case 'requests':
@@ -294,6 +298,93 @@ try {
             }
             $store->deleteKey($keyId);
             forum_json(['success' => true]);
+
+        case 'ssh_keys':
+            if ($bot === null && $sessionUser === null) {
+                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key of webhook_secret.'], 401);
+            }
+            if ($bot !== null) {
+                forum_json(['success' => true, 'ssh_keys' => $store->listSshKeysForBot($bot)]);
+            }
+            $user = forum_require_human($sessionUser);
+            forum_json(['success' => true, 'ssh_keys' => $store->listSshKeysForOwner($user['email'])]);
+
+        case 'ssh_key_register':
+            forum_require_method(['POST']);
+            if ($bot === null && $sessionUser === null) {
+                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key of webhook_secret.'], 401);
+            }
+            $parsedKey = null;
+            $publicKey = forum_ssh_public_key_from_payload($payload);
+            try {
+                $parsedKey = forum_ssh_parse_public_key($publicKey);
+            } catch (InvalidArgumentException $exception) {
+                forum_json(['success' => false, 'error' => $exception->getMessage()], 422);
+            }
+            $label = trim((string) ($payload['label'] ?? $payload['name'] ?? $parsedKey['comment']));
+            if ($bot !== null) {
+                $scope = forum_ssh_scope_from_payload($payload, 'bot');
+                if ($scope === 'account') {
+                    forum_json(['success' => false, 'error' => 'Account-scope vereist een menselijke sessie.'], 403);
+                }
+                if ($scope !== 'bot') {
+                    forum_json(['success' => false, 'error' => 'Scope moet bot of account zijn.'], 422);
+                }
+                $key = $store->registerSshKey(
+                    $parsedKey,
+                    'bot',
+                    $label,
+                    (string) $bot['owner_email'],
+                    (int) $bot['id'],
+                    (int) $bot['id'],
+                    (string) $bot['owner_email']
+                );
+                forum_json(['success' => true, 'ssh_key' => $key], 201);
+            }
+            $user = forum_require_human($sessionUser);
+            forum_require_csrf($payload);
+            $scope = forum_ssh_scope_from_payload($payload, 'account');
+            $humanBotId = null;
+            if ($scope === 'bot') {
+                $humanBotId = (int) ($payload['bot_id'] ?? 0);
+                if ($humanBotId <= 0) {
+                    forum_json(['success' => false, 'error' => 'Bot-id ontbreekt voor bot-scope.'], 422);
+                }
+                $owned = $store->getBot($humanBotId);
+                if ($owned === null || strtolower((string) $owned['owner_email']) !== strtolower($user['email'])) {
+                    forum_json(['success' => false, 'error' => 'Bot niet gevonden.'], 404);
+                }
+            } elseif ($scope !== 'account') {
+                forum_json(['success' => false, 'error' => 'Scope moet bot of account zijn.'], 422);
+            }
+            $key = $store->registerSshKey(
+                $parsedKey,
+                $scope,
+                $label,
+                $user['email'],
+                $humanBotId,
+                null,
+                $user['email']
+            );
+            forum_json(['success' => true, 'ssh_key' => $key], 201);
+
+        case 'ssh_key_revoke':
+            forum_require_method(['POST', 'DELETE']);
+            if ($bot === null && $sessionUser === null) {
+                forum_json(['success' => false, 'error' => 'Ongeldige bot API-key of webhook_secret.'], 401);
+            }
+            $revokeId = forum_ssh_revoke_id_from_payload($payload);
+            if ($revokeId === '') {
+                forum_json(['success' => false, 'error' => 'Key-id of fingerprint ontbreekt.'], 422);
+            }
+            if ($bot !== null) {
+                $revoked = $store->revokeSshKey($revokeId, $bot, (string) $bot['owner_email']);
+                forum_json(['success' => true, 'revoked' => true, 'ssh_key' => $revoked]);
+            }
+            $user = forum_require_human($sessionUser);
+            forum_require_csrf($payload);
+            $revoked = $store->revokeSshKey($revokeId, null, $user['email']);
+            forum_json(['success' => true, 'revoked' => true, 'ssh_key' => $revoked]);
 
         default:
             forum_json(['success' => false, 'error' => 'unknown_action'], 422);

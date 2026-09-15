@@ -122,6 +122,7 @@ class ForumStore
             )'
         );
         $this->ensureKeystoreUsernameColumn();
+        $this->ensureSshKeysTable();
     }
 
     private function ensureMessagesAckedColumn(): void
@@ -180,6 +181,71 @@ class ForumStore
     {
         $this->ensureTextColumn('bots', 'grok_agent_id');
         $this->ensureTextColumn('access_requests', 'grok_agent_id');
+    }
+
+    private function ensureSshKeysTable(): void
+    {
+        $this->pdo->exec(
+            'CREATE TABLE IF NOT EXISTS ssh_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fingerprint TEXT NOT NULL,
+                public_key TEXT NOT NULL,
+                key_type TEXT NOT NULL,
+                label TEXT NOT NULL DEFAULT "",
+                scope TEXT NOT NULL,
+                bot_id INTEGER,
+                owner_email TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                created_by_bot_id INTEGER,
+                created_by_owner_email TEXT NOT NULL DEFAULT "",
+                revoked_at INTEGER
+            )'
+        );
+        $this->pdo->exec(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_ssh_keys_fingerprint_active
+             ON ssh_keys(fingerprint) WHERE revoked_at IS NULL'
+        );
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_ssh_keys_owner ON ssh_keys(owner_email, scope)');
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_ssh_keys_bot ON ssh_keys(bot_id)');
+        $this->pdo->exec(
+            'CREATE TABLE IF NOT EXISTS ssh_signature_nonces (
+                signature_hash TEXT PRIMARY KEY,
+                used_at INTEGER NOT NULL
+            )'
+        );
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_ssh_signature_nonces_used ON ssh_signature_nonces(used_at)');
+    }
+
+    /**
+     * Record a verified SSH signature so it cannot be replayed inside the timestamp window.
+     * Returns false when this signature was already used.
+     */
+    public function consumeSshSignature(string $signatureHash, int $now): bool
+    {
+        $signatureHash = trim($signatureHash);
+        if ($signatureHash === '') {
+            return false;
+        }
+
+        $cutoff = $now - FORUM_SSH_TIMESTAMP_SKEW_SECONDS - 60;
+        $cleanup = $this->pdo->prepare('DELETE FROM ssh_signature_nonces WHERE used_at < :cutoff');
+        $cleanup->execute([':cutoff' => $cutoff]);
+
+        try {
+            $insert = $this->pdo->prepare(
+                'INSERT INTO ssh_signature_nonces (signature_hash, used_at) VALUES (:hash, :used_at)'
+            );
+            $insert->execute([
+                ':hash' => $signatureHash,
+                ':used_at' => $now,
+            ]);
+            return true;
+        } catch (PDOException $exception) {
+            if (str_contains($exception->getMessage(), 'UNIQUE') || (int) $exception->getCode() === 23000) {
+                return false;
+            }
+            throw $exception;
+        }
     }
 
     private function ensureTextColumn(string $table, string $column): void
@@ -616,6 +682,48 @@ class ForumStore
         }
 
         return $this->findBotByWebhookSecret($credential);
+    }
+
+    /**
+     * Resolve a bot owned by $ownerEmail from uid, grok_agent_id, or numeric bot id.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findOwnedBotByClaim(string $ownerEmail, string $claim): ?array
+    {
+        $ownerEmail = strtolower(trim($ownerEmail));
+        $claim = trim($claim);
+        if ($ownerEmail === '' || $claim === '') {
+            return null;
+        }
+
+        if (preg_match('/^\d+$/', $claim) === 1) {
+            $bot = $this->getBot((int) $claim);
+            if ($bot !== null && strtolower((string) $bot['owner_email']) === $ownerEmail) {
+                return $bot;
+            }
+        }
+
+        $byUid = $this->findBotByUid($claim);
+        if ($byUid !== null && strtolower((string) $byUid['owner_email']) === $ownerEmail) {
+            return $byUid;
+        }
+
+        $statement = $this->pdo->prepare(
+            'SELECT * FROM bots
+             WHERE grok_agent_id = :claim
+               AND owner_email = :email COLLATE NOCASE'
+        );
+        $statement->execute([
+            ':claim' => $claim,
+            ':email' => $ownerEmail,
+        ]);
+        $rows = $statement->fetchAll();
+        if (count($rows) !== 1) {
+            return null;
+        }
+
+        return $this->normalizeBot($rows[0]);
     }
 
     /**
@@ -1130,6 +1238,254 @@ class ForumStore
         $statement->execute([':id' => $id]);
         $row = $statement->fetch();
         return is_array($row) ? $this->normalizeKey($row) : null;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function registerSshKey(
+        array $parsedKey,
+        string $scope,
+        string $label,
+        string $ownerEmail,
+        ?int $botId,
+        ?int $createdByBotId,
+        string $createdByOwnerEmail
+    ): array {
+        $scope = strtolower(trim($scope));
+        if (!in_array($scope, ['bot', 'account'], true)) {
+            throw new InvalidArgumentException('Scope moet bot of account zijn.');
+        }
+        if ($scope === 'bot' && ($botId === null || $botId <= 0)) {
+            throw new InvalidArgumentException('Bot-scope vereist een bot.');
+        }
+        if ($scope === 'account') {
+            $botId = null;
+        }
+
+        $ownerEmail = strtolower(trim($ownerEmail));
+        $createdByOwnerEmail = strtolower(trim($createdByOwnerEmail));
+        $label = trim($label);
+        if ($label === '') {
+            $label = trim((string) ($parsedKey['comment'] ?? ''));
+        }
+        if ($label === '') {
+            $label = (string) ($parsedKey['type'] ?? 'ssh');
+        }
+        if ($ownerEmail === '') {
+            throw new InvalidArgumentException('Eigenaar ontbreekt voor deze SSH-sleutel.');
+        }
+
+        $active = $this->countActiveSshKeysForOwner($ownerEmail);
+        if ($active >= FORUM_SSH_MAX_KEYS_PER_OWNER) {
+            throw new InvalidArgumentException('Maximum aantal SSH-sleutels voor dit account is bereikt.');
+        }
+
+        $now = forum_now();
+        $statement = $this->pdo->prepare(
+            'INSERT INTO ssh_keys (
+                fingerprint, public_key, key_type, label, scope, bot_id, owner_email,
+                created_at, created_by_bot_id, created_by_owner_email, revoked_at
+             ) VALUES (
+                :fingerprint, :public_key, :key_type, :label, :scope, :bot_id, :owner_email,
+                :created_at, :created_by_bot_id, :created_by_owner_email, NULL
+             )'
+        );
+        try {
+            $statement->execute([
+                ':fingerprint' => (string) $parsedKey['fingerprint'],
+                ':public_key' => (string) $parsedKey['public_key'],
+                ':key_type' => (string) $parsedKey['type'],
+                ':label' => $label,
+                ':scope' => $scope,
+                ':bot_id' => $botId,
+                ':owner_email' => $ownerEmail,
+                ':created_at' => $now,
+                ':created_by_bot_id' => $createdByBotId,
+                ':created_by_owner_email' => $createdByOwnerEmail,
+            ]);
+        } catch (PDOException $exception) {
+            if (str_contains($exception->getMessage(), 'UNIQUE') || (int) $exception->getCode() === 23000) {
+                throw new RuntimeException('Deze publieke sleutel is al geregistreerd.');
+            }
+            throw $exception;
+        }
+
+        $created = $this->findSshKey((string) $this->pdo->lastInsertId());
+        if ($created === null) {
+            throw new RuntimeException('SSH-sleutel kon niet worden opgeslagen.');
+        }
+        return $this->publicSshKey($created);
+    }
+
+    public function countActiveSshKeysForOwner(string $ownerEmail): int
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM ssh_keys WHERE owner_email = :email AND revoked_at IS NULL'
+        );
+        $statement->execute([':email' => strtolower(trim($ownerEmail))]);
+        return (int) $statement->fetchColumn();
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function findSshKey(string $idOrFingerprint): ?array
+    {
+        $idOrFingerprint = trim($idOrFingerprint);
+        if ($idOrFingerprint === '') {
+            return null;
+        }
+
+        if (preg_match('/^\d+$/', $idOrFingerprint) === 1) {
+            $statement = $this->pdo->prepare('SELECT * FROM ssh_keys WHERE id = :id LIMIT 1');
+            $statement->execute([':id' => (int) $idOrFingerprint]);
+        } else {
+            $fingerprint = forum_ssh_normalize_fingerprint($idOrFingerprint);
+            $statement = $this->pdo->prepare(
+                'SELECT * FROM ssh_keys
+                 WHERE fingerprint = :fp
+                 ORDER BY CASE WHEN revoked_at IS NULL THEN 0 ELSE 1 END ASC, id DESC
+                 LIMIT 1'
+            );
+            $statement->execute([':fp' => $fingerprint]);
+        }
+        $row = $statement->fetch();
+        return is_array($row) ? $this->normalizeSshKey($row) : null;
+    }
+
+    /**
+     * @param array<string, mixed> $bot
+     * @return list<array<string, mixed>>
+     */
+    public function listSshKeysForBot(array $bot): array
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT * FROM ssh_keys
+             WHERE revoked_at IS NULL
+               AND (
+                    (scope = "bot" AND bot_id = :bot_id)
+                    OR (scope = "account" AND owner_email = :email)
+               )
+             ORDER BY id ASC'
+        );
+        $statement->execute([
+            ':bot_id' => (int) ($bot['id'] ?? 0),
+            ':email' => strtolower((string) ($bot['owner_email'] ?? '')),
+        ]);
+        return array_map(fn(array $row): array => $this->publicSshKey($this->normalizeSshKey($row)), $statement->fetchAll());
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listSshKeysForOwner(string $ownerEmail): array
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT * FROM ssh_keys
+             WHERE owner_email = :email AND revoked_at IS NULL
+             ORDER BY id ASC'
+        );
+        $statement->execute([':email' => strtolower(trim($ownerEmail))]);
+        return array_map(fn(array $row): array => $this->publicSshKey($this->normalizeSshKey($row)), $statement->fetchAll());
+    }
+
+    /**
+     * @param array<string, mixed> $actorBot
+     * @return array<string, mixed>
+     */
+    public function revokeSshKey(string $idOrFingerprint, ?array $actorBot, ?string $ownerEmail): array
+    {
+        $key = $this->findSshKey($idOrFingerprint);
+        if ($key === null) {
+            throw new RuntimeException('SSH-sleutel niet gevonden.');
+        }
+        if (!empty($key['revoked_at'])) {
+            throw new RuntimeException('SSH-sleutel niet gevonden.');
+        }
+
+        $ownerEmail = strtolower(trim((string) $ownerEmail));
+        $keyOwner = strtolower((string) $key['owner_email']);
+        $allowed = false;
+        if ($ownerEmail !== '' && $keyOwner === $ownerEmail) {
+            $allowed = true;
+        }
+        if ($actorBot !== null) {
+            $botOwner = strtolower((string) ($actorBot['owner_email'] ?? ''));
+            if ($key['scope'] === 'bot' && (int) $key['bot_id'] === (int) ($actorBot['id'] ?? 0)) {
+                $allowed = true;
+            }
+            if ($key['scope'] === 'account' && $botOwner !== '' && $botOwner === $keyOwner) {
+                $allowed = true;
+            }
+        }
+        if (!$allowed) {
+            throw new RuntimeException('SSH-sleutel niet gevonden.');
+        }
+
+        $now = forum_now();
+        $statement = $this->pdo->prepare(
+            'UPDATE ssh_keys SET revoked_at = :revoked_at WHERE id = :id AND revoked_at IS NULL'
+        );
+        $statement->execute([
+            ':revoked_at' => $now,
+            ':id' => (int) $key['id'],
+        ]);
+        $key['revoked_at'] = $now;
+        return [
+            'id' => (int) $key['id'],
+            'fingerprint' => (string) $key['fingerprint'],
+            'revoked_at' => $now,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    public function publicSshKey(array $row): array
+    {
+        return [
+            'id' => (int) ($row['id'] ?? 0),
+            'fingerprint' => (string) ($row['fingerprint'] ?? ''),
+            'public_key' => (string) ($row['public_key'] ?? ''),
+            'key_type' => (string) ($row['key_type'] ?? ''),
+            'label' => (string) ($row['label'] ?? ''),
+            'scope' => (string) ($row['scope'] ?? ''),
+            'bot_id' => isset($row['bot_id']) && $row['bot_id'] !== null && (int) $row['bot_id'] > 0
+                ? (int) $row['bot_id']
+                : null,
+            'owner_email' => (string) ($row['owner_email'] ?? ''),
+            'created_at' => (int) ($row['created_at'] ?? 0),
+            'created_by_bot_id' => isset($row['created_by_bot_id']) && $row['created_by_bot_id'] !== null && (int) $row['created_by_bot_id'] > 0
+                ? (int) $row['created_by_bot_id']
+                : null,
+            'created_by_owner_email' => (string) ($row['created_by_owner_email'] ?? ''),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function normalizeSshKey(array $row): array
+    {
+        return [
+            'id' => (int) ($row['id'] ?? 0),
+            'fingerprint' => (string) ($row['fingerprint'] ?? ''),
+            'public_key' => (string) ($row['public_key'] ?? ''),
+            'key_type' => (string) ($row['key_type'] ?? ''),
+            'label' => (string) ($row['label'] ?? ''),
+            'scope' => (string) ($row['scope'] ?? ''),
+            'bot_id' => isset($row['bot_id']) && $row['bot_id'] !== null ? (int) $row['bot_id'] : null,
+            'owner_email' => (string) ($row['owner_email'] ?? ''),
+            'created_at' => (int) ($row['created_at'] ?? 0),
+            'created_by_bot_id' => isset($row['created_by_bot_id']) && $row['created_by_bot_id'] !== null
+                ? (int) $row['created_by_bot_id']
+                : null,
+            'created_by_owner_email' => (string) ($row['created_by_owner_email'] ?? ''),
+            'revoked_at' => isset($row['revoked_at']) && $row['revoked_at'] !== null ? (int) $row['revoked_at'] : null,
+        ];
     }
 
     /**
