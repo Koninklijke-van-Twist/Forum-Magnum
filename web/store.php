@@ -207,6 +207,45 @@ class ForumStore
         );
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_ssh_keys_owner ON ssh_keys(owner_email, scope)');
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_ssh_keys_bot ON ssh_keys(bot_id)');
+        $this->pdo->exec(
+            'CREATE TABLE IF NOT EXISTS ssh_signature_nonces (
+                signature_hash TEXT PRIMARY KEY,
+                used_at INTEGER NOT NULL
+            )'
+        );
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_ssh_signature_nonces_used ON ssh_signature_nonces(used_at)');
+    }
+
+    /**
+     * Record a verified SSH signature so it cannot be replayed inside the timestamp window.
+     * Returns false when this signature was already used.
+     */
+    public function consumeSshSignature(string $signatureHash, int $now): bool
+    {
+        $signatureHash = trim($signatureHash);
+        if ($signatureHash === '') {
+            return false;
+        }
+
+        $cutoff = $now - FORUM_SSH_TIMESTAMP_SKEW_SECONDS - 60;
+        $cleanup = $this->pdo->prepare('DELETE FROM ssh_signature_nonces WHERE used_at < :cutoff');
+        $cleanup->execute([':cutoff' => $cutoff]);
+
+        try {
+            $insert = $this->pdo->prepare(
+                'INSERT INTO ssh_signature_nonces (signature_hash, used_at) VALUES (:hash, :used_at)'
+            );
+            $insert->execute([
+                ':hash' => $signatureHash,
+                ':used_at' => $now,
+            ]);
+            return true;
+        } catch (PDOException $exception) {
+            if (str_contains($exception->getMessage(), 'UNIQUE') || (int) $exception->getCode() === 23000) {
+                return false;
+            }
+            throw $exception;
+        }
     }
 
     private function ensureTextColumn(string $table, string $column): void
@@ -663,7 +702,6 @@ class ForumStore
             if ($bot !== null && strtolower((string) $bot['owner_email']) === $ownerEmail) {
                 return $bot;
             }
-            return null;
         }
 
         $byUid = $this->findBotByUid($claim);

@@ -83,7 +83,12 @@ if (\$cfg['raw_body'] !== '') {
 }
 if (\$cfg['session'] !== []) {
     session_start();
-    \$_SESSION['user'] = \$cfg['session'];
+    \$session = \$cfg['session'];
+    if (isset(\$session['forum_csrf'])) {
+        \$_SESSION['forum_csrf'] = \$session['forum_csrf'];
+        unset(\$session['forum_csrf']);
+    }
+    \$_SESSION['user'] = \$session;
 }
 if (\$cfg['raw_body'] !== '') {
     \$_GET = \$cfg['method'] === 'GET' ? \$cfg['params'] : [];
@@ -95,6 +100,8 @@ if (\$cfg['raw_body'] !== '') {
     \$_GET = [];
     \$_POST = \$cfg['params'];
 }
+\$_SERVER['QUERY_STRING'] = http_build_query(\$_GET);
+\$_SERVER['REQUEST_URI'] = '/api.php' . (\$_SERVER['QUERY_STRING'] !== '' ? '?' . \$_SERVER['QUERY_STRING'] : '');
 \$_REQUEST = array_merge(\$_GET, \$_POST);
 register_shutdown_function(static function (): void {
     echo "\\n<!--HTTP_STATUS:" . http_response_code() . "-->";
@@ -181,11 +188,18 @@ function forum_test_ssh_headers(
 ): array {
     $timestamp = $timestamp ?? time();
     $method = strtoupper($method);
-    $rawBody = $method === 'GET' ? '' : (string) json_encode($params, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $queryString = '';
+    $rawBody = '';
+    if ($method === 'GET') {
+        $queryString = http_build_query($params);
+    } else {
+        $rawBody = (string) json_encode($params, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    $path = '/api.php' . ($queryString === '' ? '' : '?' . $queryString);
     $canonical = forum_ssh_canonical_string(
         (string) $timestamp,
         $method,
-        '/api.php',
+        $path,
         hash('sha256', $rawBody),
         $claimed
     );
@@ -552,6 +566,9 @@ forum_test('help spec is machine-readable and includes inbox/ack', function () u
     forum_assert(str_contains((string) ($help['json']['auth']['webhook_secret'] ?? ''), 'uniek'), 'help moet webhook_secret-auth documenteren.');
     forum_assert(isset($help['json']['auth']['ssh_key']['headers']['X-Magnum-Signature'], $help['json']['auth']['ssh_key']['scopes']['bot'], $help['json']['auth']['ssh_key']['scopes']['account']), 'help mist SSH-auth.');
     forum_assert(str_contains((string) ($help['json']['auth']['ssh_key']['canonical'] ?? ''), 'MAGNUM-SSH-V1'), 'help mist canonical string.');
+    forum_assert(str_contains((string) ($help['json']['auth']['ssh_key']['path'] ?? ''), 'QUERY_STRING'), 'help moet query string in de canonical path documenteren.');
+    forum_assert(str_contains((string) ($help['json']['auth']['ssh_key']['replay'] ?? ''), 'single-use'), 'help moet replay-bescherming documenteren.');
+    forum_assert(str_contains((string) ($help['json']['auth']['ssh_key']['scopes']['account'] ?? ''), 'human session'), 'help moet account-scope als menselijk documenteren.');
     forum_assert(str_contains((string) ($help['json']['auth']['ssh_key']['not_keystore'] ?? ''), 'ssh_keys'), 'help moet keys vs ssh_keys scheiden.');
     forum_assert(isset($help['json']['auth']['identity']['owner_email'], $help['json']['auth']['identity']['grok_agent_id']), 'help mist identity-velden.');
 
@@ -563,6 +580,10 @@ forum_test('help spec is machine-readable and includes inbox/ack', function () u
 
     $inbox = $help['json']['actions']['inbox'];
     forum_assert($inbox['auth'] === FORUM_BOT_AUTH && $inbox['auth_required'] === true, 'inbox-auth klopt niet.');
+    $inboxErrors = json_encode($inbox['errors'] ?? []);
+    forum_assert(str_contains((string) $inboxErrors, 'SSH-tijdstempel is ongeldig of verlopen.'), 'inbox-spec mist expired SSH-timestamp.');
+    $registerSshErrors = json_encode($help['json']['actions']['ssh_key_register']['errors'] ?? []);
+    forum_assert(str_contains((string) $registerSshErrors, 'Account-scope vereist een menselijke sessie.'), 'ssh_key_register-spec mist 403 voor account-scope.');
     forum_assert(in_array('GET', $inbox['methods'], true) && in_array('POST', $inbox['methods'], true), 'inbox-methods kloppen niet.');
     $inboxFields = [];
     foreach ($inbox['fields'] as $field) {
@@ -902,13 +923,32 @@ forum_test('ssh public-key auth registers, signs, scopes, revokes and still acce
     forum_assert(!isset($botRegister['json']['ssh_key']['private_key']), 'Private key mag nooit terugkomen.');
     $botKeyId = (string) ($botRegister['json']['ssh_key']['id'] ?? '');
 
-    $accountRegister = forum_call_api($dbPath, 'POST', [
+    $botAccountDenied = forum_call_api($dbPath, 'POST', [
         'action' => 'ssh_key_register',
         'public_key' => $accountKey['openssh'],
         'scope' => 'account',
         'label' => 'tim-account',
     ], (string) $asclepius['bot_api_key']);
-    forum_assert(($accountRegister['status'] ?? 0) === 201, 'Account-scope registreren met bot_api_key moet slagen.');
+    forum_assert(($botAccountDenied['status'] ?? 0) === 403, 'Bot mag geen account-scope registreren.');
+    forum_assert(
+        ($botAccountDenied['json']['error'] ?? '') === 'Account-scope vereist een menselijke sessie.',
+        'Account-scope 403-fout klopt niet.'
+    );
+
+    $accountRegister = forum_call_api($dbPath, 'POST', [
+        'action' => 'ssh_key_register',
+        'public_key' => $accountKey['openssh'],
+        'scope' => 'account',
+        'label' => 'tim-account',
+        'csrf' => 'ssh-csrf',
+    ], '', [
+        'email' => 'tfalken@kvt.nl',
+        'name' => 'Tim Falken',
+        'api_key' => 'access-tim',
+        'oid' => 'tim',
+        'forum_csrf' => 'ssh-csrf',
+    ]);
+    forum_assert(($accountRegister['status'] ?? 0) === 201, 'Account-scope registreren met menselijke sessie moet slagen. ' . ($accountRegister['raw'] ?? ''));
     forum_assert(($accountRegister['json']['ssh_key']['scope'] ?? '') === 'account', 'Account-scope werd niet opgeslagen.');
     forum_assert(($accountRegister['json']['ssh_key']['owner_email'] ?? '') === 'tfalken@kvt.nl', 'Account-key moet aan owner_email hangen.');
     forum_assert(($accountRegister['json']['ssh_key']['bot_id'] ?? null) === null, 'Account-key mag niet aan één bot hangen.');
@@ -937,6 +977,16 @@ forum_test('ssh public-key auth registers, signs, scopes, revokes and still acce
     $signedIndex = forum_call_api($dbPath, 'POST', ['action' => 'index'], '', [], $botHeaders, $indexBody);
     forum_assert(($signedIndex['status'] ?? 0) === 200, 'index met bot-SSH zonder X-API-Key moet slagen. ' . ($signedIndex['raw'] ?? ''));
     forum_assert(isset($signedIndex['json']['users']), 'SSH-index gaf geen users.');
+    $replayedIndex = forum_call_api($dbPath, 'POST', ['action' => 'index'], '', [], $botHeaders, $indexBody);
+    forum_assert(($replayedIndex['status'] ?? 0) === 401, 'Hergebruikte SSH-handtekening moet 401 zijn.');
+    forum_assert(($replayedIndex['json']['error'] ?? '') === 'Deze SSH-handtekening is al gebruikt.', 'Replay-fout klopt niet.');
+
+    [$getHeaders] = forum_test_ssh_headers($botKey, 'GET', ['action' => 'index'], '', null, null, $botKeyId);
+    $signedGet = forum_call_api($dbPath, 'GET', ['action' => 'index'], '', [], $getHeaders);
+    forum_assert(($signedGet['status'] ?? 0) === 200 && isset($signedGet['json']['users']), 'GET index met query in canonical path moet slagen. ' . ($signedGet['raw'] ?? ''));
+    $replayedAction = forum_call_api($dbPath, 'GET', ['action' => 'keys'], '', [], $getHeaders);
+    forum_assert(($replayedAction['status'] ?? 0) === 401, 'Getekende GET mag niet als andere action worden herhaald.');
+    forum_assert(($replayedAction['json']['error'] ?? '') === 'Ongeldige SSH-handtekening of publieke sleutel.', 'Query-swap moet de handtekening ongeldig maken.');
 
     $store->sendMessage($iris, [
         'to_uid' => 'asclepius-1',
@@ -961,6 +1011,15 @@ forum_test('ssh public-key auth registers, signs, scopes, revokes and still acce
     $impersonate = forum_call_api($dbPath, 'POST', ['action' => 'inbox'], '', [], $impersonateHeaders, $impersonateBody);
     forum_assert(($impersonate['status'] ?? 0) === 401, 'Account-key mag niet als bot van een andere eigenaar optreden.');
     forum_assert(($impersonate['json']['error'] ?? '') === 'Deze account-sleutel mag niet als die bot optreden.', 'Impersonatie-fout klopt niet.');
+
+    $previousUid = (string) $iris['uid'];
+    $store->updateBot((int) $iris['id'], ['uid' => '9001']);
+    $byDigitUid = $store->findOwnedBotByClaim('tfalken@kvt.nl', '9001');
+    forum_assert($byDigitUid !== null && (int) $byDigitUid['id'] === (int) $iris['id'], 'All-digit uid moet via findBotByUid gevonden worden.');
+    [$digitHeaders, $digitBody] = forum_test_ssh_headers($accountKey, 'POST', ['action' => 'index'], '9001');
+    $digitClaim = forum_call_api($dbPath, 'POST', ['action' => 'index'], '', [], $digitHeaders, $digitBody);
+    forum_assert(($digitClaim['status'] ?? 0) === 200 && isset($digitClaim['json']['users']), 'Account-key mag all-digit uid claimen. ' . ($digitClaim['raw'] ?? ''));
+    $store->updateBot((int) $iris['id'], ['uid' => $previousUid]);
 
     $accountNoClaim = forum_test_ssh_headers($accountKey, 'POST', ['action' => 'index']);
     $missingClaim = forum_call_api($dbPath, 'POST', ['action' => 'index'], '', [], $accountNoClaim[0], $accountNoClaim[1]);
@@ -1013,7 +1072,14 @@ forum_test('ssh public-key auth registers, signs, scopes, revokes and still acce
         'action' => 'ssh_key_register',
         'public_key' => $accountKey['openssh'],
         'scope' => 'account',
-    ], (string) $asclepius['bot_api_key']);
+        'csrf' => 'ssh-csrf',
+    ], '', [
+        'email' => 'tfalken@kvt.nl',
+        'name' => 'Tim Falken',
+        'api_key' => 'access-tim',
+        'oid' => 'tim',
+        'forum_csrf' => 'ssh-csrf',
+    ]);
     forum_assert(($duplicate['status'] ?? 0) === 409, 'Dubbele fingerprint moet 409 zijn.');
 
     [$rsaHeaders, $rsaBody] = forum_test_ssh_headers($rsaKey, 'POST', ['action' => 'index']);
