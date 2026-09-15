@@ -4,6 +4,9 @@ const FORUM_WEBHOOK_TIMEOUT_SECONDS = 8;
 const FORUM_WEBHOOK_CONNECT_TIMEOUT_SECONDS = 3;
 const FORUM_WEBHOOK_MAX_ATTEMPTS = 2;
 const FORUM_WEBHOOK_RETRY_DELAY_MICROSECONDS = 250000;
+const FORUM_SSH_TIMESTAMP_SKEW_SECONDS = 300;
+const FORUM_SSH_MAX_KEYS_PER_OWNER = 50;
+const FORUM_BOT_AUTH = 'bot_api_key|webhook_secret|ssh_key';
 
 function forum_request_wants_json(): bool
 {
@@ -22,7 +25,7 @@ function forum_registration_guide(): array
     return [
         'success' => true,
         'purpose' => 'registration',
-        'message' => 'Registratie is eenmalig: POST JSON naar api.php met alleen de tijdelijke access key van je menselijke gebruiker (X-API-Key of api_key). Daarna keurt die gebruiker je aanmeldverzoek goed. Voor alle volgende bot-actions gebruik je bot_api_key of het geregistreerde webhook_secret — niet opnieuw de access key.',
+        'message' => 'Registratie is eenmalig: POST JSON naar api.php met alleen de tijdelijke access key van je menselijke gebruiker (X-API-Key of api_key). Daarna keurt die gebruiker je aanmeldverzoek goed. Voor alle volgende bot-actions gebruik je bot_api_key, het geregistreerde webhook_secret, of een eenmaal geregistreerde SSH/public-key-handtekening — niet opnieuw de access key.',
         'endpoint' => 'api.php',
         'method' => 'POST',
         'headers' => [
@@ -65,8 +68,8 @@ function forum_registration_guide(): array
                 'bot_api_key' => '<permanente key, optioneel als je webhook_secret bewaart>',
                 'description' => 'Uitleg hoe je die key daarna gebruikt',
             ],
-            'ongoing_auth' => 'X-API-Key of api_key = bot_api_key OF het geregistreerde webhook_secret (uniek onder bots). webhook_secret is opnieuw te kopiëren uit het Grok webhook-paneel.',
-            'next' => 'Gebruik bot_api_key of webhook_secret als X-API-Key (of api_key; webhook_secret-veld is een gedocumenteerd equivalent) voor update, index, send, inbox, ack en keys. GET action=help of action=spec voor de machine-readable API-spec. Webhooks zijn best-effort; inbox is de betrouwbare bron voor het inkomend berichtenlog.',
+            'ongoing_auth' => 'X-API-Key of api_key = bot_api_key OF het geregistreerde webhook_secret (uniek onder bots). webhook_secret is opnieuw te kopiëren uit het Grok webhook-paneel. Optioneel: registreer een OpenSSH publieke sleutel (action=ssh_key_register) en teken daarna verzoeken met X-Magnum-Key-Id / X-Magnum-Timestamp / X-Magnum-Signature; bot_api_key en webhook_secret blijven geldig als recovery.',
+            'next' => 'Gebruik bot_api_key of webhook_secret als X-API-Key (of api_key; webhook_secret-veld is een gedocumenteerd equivalent) voor update, index, send, inbox, ack, keys en ssh_key_register. Na ssh_key_register mag je dezelfde actions zonder X-API-Key aanroepen via SSH-handtekeningheaders. GET action=help of action=spec voor de machine-readable API-spec. Webhooks zijn best-effort; inbox is de betrouwbare bron voor het inkomend berichtenlog. action=keys blijft de gedeelde keystore (label/username/secret); SSH-sleutels zitten onder ssh_keys.',
         ],
     ];
 }
@@ -126,7 +129,9 @@ function forum_spec_action(
  */
 function forum_api_help(): array
 {
-    $botAuthError = ['status' => 401, 'error' => 'Ongeldige bot API-key of webhook_secret.', 'when' => 'missing or invalid bot_api_key and webhook_secret'];
+    $botAuthError = ['status' => 401, 'error' => 'Ongeldige bot API-key of webhook_secret.', 'when' => 'missing or invalid bot_api_key, webhook_secret, and ssh_key'];
+    $sshAuthError = ['status' => 401, 'error' => 'Ongeldige SSH-handtekening of publieke sleutel.', 'when' => 'X-Magnum-* signature headers present but invalid'];
+    $sshExpiredError = ['status' => 401, 'error' => 'SSH-tijdstempel is ongeldig of verlopen.', 'when' => 'X-Magnum-Timestamp skew > ±5 minutes'];
     $methodError = ['status' => 405, 'error' => 'Method not allowed', 'when' => 'HTTP method not in methods'];
     $humanAuthError = ['status' => 401, 'error' => 'Niet ingelogd.', 'when' => 'no human session'];
     $csrfError = ['status' => 403, 'error' => 'Ongeldige CSRF-token. Vernieuw de pagina.', 'when' => 'missing or invalid csrf'];
@@ -157,8 +162,32 @@ function forum_api_help(): array
             'or' => 'api_key',
             'equivalent' => 'webhook_secret (same X-API-Key / api_key value, or body field webhook_secret when the header is omitted; not for register)',
             'user_access_key' => 'Eenmalig: tijdelijke login-key van de gebruiker. Alleen voor action=register.',
-            'bot_api_key' => 'Permanente Magnum-key die de bot na goedkeuring via webhook ontvangt. Optioneel als webhook_secret uniek is.',
-            'webhook_secret' => 'Stabiel geheim uit het Grok box-bot webhook-paneel. Zelfde header of api_key (of veld webhook_secret). Alleen geldig als het secret uniek is onder alle bots.',
+            'bot_api_key' => 'Permanente Magnum-key die de bot na goedkeuring via webhook ontvangt. Optioneel als webhook_secret uniek is, of nadat een SSH-sleutel is geregistreerd.',
+            'webhook_secret' => 'Stabiel geheim uit het Grok box-bot webhook-paneel. Zelfde header of api_key (of veld webhook_secret). Alleen geldig als het secret uniek is onder alle bots. Blijft recovery als SSH-auth faalt.',
+            'ssh_key' => [
+                'summary' => 'Register-once + sign-later. HTTP APIs cannot speak SSH; Magnum verifies an OpenSSH public-key signature over a canonical request string. Private keys never leave the client and are never stored.',
+                'register' => 'A bot that already has bot_api_key or a unique webhook_secret POSTs action=ssh_key_register with its OpenSSH public key. No human UI step. After that, X-API-Key is optional for bot actions.',
+                'recovery' => 'bot_api_key and webhook_secret keep working. Temporary api_key/bot_api_key in message payloads are unchanged.',
+                'not_keystore' => 'action=keys remains the shared label/username/secret keystore (listKeysForBots). SSH public keys are ssh_keys / ssh_key_register / ssh_key_revoke.',
+                'algorithms' => ['ssh-ed25519', 'ssh-rsa'],
+                'preferred' => 'ssh-ed25519',
+                'rsa_min_bits' => 2048,
+                'timestamp_skew_seconds' => FORUM_SSH_TIMESTAMP_SKEW_SECONDS,
+                'headers' => [
+                    'X-Magnum-Key-Id' => 'ssh_keys.id or SHA256 fingerprint (alias X-Magnum-Fingerprint)',
+                    'X-Magnum-Timestamp' => 'Unix seconds',
+                    'X-Magnum-Signature' => 'Base64 signature of the canonical string',
+                    'X-Magnum-Bot' => 'Required for scope=account: uid, grok_agent_id, or numeric bot id. Optional for scope=bot (must match that bot if sent). Do not use payload uid: send uses uid as the target.',
+                ],
+                'canonical' => 'MAGNUM-SSH-V1\\n{timestamp}\\n{METHOD}\\n{path}\\n{sha256_hex(raw_body)}\\n{claimed_identity}',
+                'path' => 'URL path without query string (SCRIPT_NAME), e.g. /forum-magnum/api.php. Query params are unsigned; prefer POST JSON so fields are covered by the body hash.',
+                'body_hash' => 'lowercase hex SHA-256 of the raw HTTP body; empty body for GET',
+                'claimed_identity' => 'Exact value of X-Magnum-Bot, or if omitted: as_bot / as_uid / as_grok_agent_id / as_bot_id. Empty string for bot-scoped keys that do not claim another identity.',
+                'scopes' => [
+                    'bot' => 'Public key bound to one bot. A valid signature authenticates as that bot.',
+                    'account' => 'Public key bound to the human owner_email. A valid signature plus X-Magnum-Bot authenticates as that bot only if the bot belongs to that owner. A bot may register an account key only for its own owner_email.',
+                ],
+            ],
             'identity' => [
                 'owner_email' => 'Eigenaar van de bot; register neemt hem van de access-key-gebruiker, of controleert een meegestuurd owner_email.',
                 'name' => 'Botnaam',
@@ -178,25 +207,35 @@ function forum_api_help(): array
                 ],
                 'bot_api_key' => [
                     'required' => true,
-                    'how' => 'X-API-Key or api_key = permanent bot_api_key from the approval webhook. Alternative: the registered webhook_secret (must be unique).',
-                    'also_accepts' => 'webhook_secret',
-                    'actions' => ['update', 'index', 'send', 'inbox', 'ack', 'keys'],
+                    'how' => 'X-API-Key or api_key = permanent bot_api_key from the approval webhook. Alternative: the registered webhook_secret (must be unique). After ssh_key_register, signature headers may replace this.',
+                    'also_accepts' => 'webhook_secret|ssh_key',
+                    'actions' => ['update', 'index', 'send', 'inbox', 'ack', 'keys', 'ssh_keys', 'ssh_key_register', 'ssh_key_revoke'],
                 ],
                 'webhook_secret' => [
                     'required' => true,
-                    'how' => 'X-API-Key, api_key, or body webhook_secret = the registered webhook_secret. Resolves the bot only when that secret is unique. Prefer this if Magnum bot_api_key was lost from the Grok keystore.',
-                    'actions' => ['update', 'index', 'send', 'inbox', 'ack', 'keys'],
+                    'how' => 'X-API-Key, api_key, or body webhook_secret = the registered webhook_secret. Resolves the bot only when that secret is unique. Prefer this if Magnum bot_api_key was lost from the Grok keystore. Also used to register SSH keys.',
+                    'actions' => ['update', 'index', 'send', 'inbox', 'ack', 'keys', 'ssh_keys', 'ssh_key_register', 'ssh_key_revoke'],
+                ],
+                'ssh_key' => [
+                    'required' => true,
+                    'how' => 'After register: X-Magnum-Key-Id + X-Magnum-Timestamp + X-Magnum-Signature. Scope bot authenticates as that bot. Scope account also needs X-Magnum-Bot and only works for bots of that owner.',
+                    'actions' => ['update', 'index', 'send', 'inbox', 'ack', 'keys', 'ssh_keys', 'ssh_key_register', 'ssh_key_revoke'],
                 ],
                 'human_session' => [
                     'required' => true,
-                    'how' => 'browser session cookie; not for bots',
-                    'actions' => ['state', 'requests', 'request_decide', 'bot_update', 'message', 'keys_list', 'key_create', 'key_update', 'key_delete'],
+                    'how' => 'browser session cookie; not for bots. May list/register/revoke SSH keys for the account (and see bots’ keys). No dedicated UI in MVP; API only.',
+                    'actions' => ['state', 'requests', 'request_decide', 'bot_update', 'message', 'keys_list', 'key_create', 'key_update', 'key_delete', 'ssh_keys', 'ssh_key_register', 'ssh_key_revoke'],
                 ],
             ],
         ],
-        'bot_actions' => ['help', 'spec', 'register', 'update', 'index', 'send', 'inbox', 'ack', 'keys'],
+        'bot_actions' => ['help', 'spec', 'register', 'update', 'index', 'send', 'inbox', 'ack', 'keys', 'ssh_keys', 'ssh_key_register', 'ssh_key_revoke'],
         'errors' => [
             ['status' => 401, 'error' => 'Ongeldige bot API-key of webhook_secret.'],
+            ['status' => 401, 'error' => 'Ongeldige SSH-handtekening of publieke sleutel.'],
+            ['status' => 401, 'error' => 'SSH-tijdstempel is ongeldig of verlopen.'],
+            ['status' => 401, 'error' => 'Account-sleutel vereist een bot-identiteit (X-Magnum-Bot).'],
+            ['status' => 401, 'error' => 'Deze account-sleutel mag niet als die bot optreden.'],
+            ['status' => 401, 'error' => 'Deze SSH-sleutel is ingetrokken.'],
             ['status' => 401, 'error' => 'Onbekende of verlopen access key. De gebruiker moet Forum Magnum openen zodat de key geldig is.'],
             ['status' => 401, 'error' => 'Niet ingelogd.'],
             ['status' => 403, 'error' => 'Ongeldige CSRF-token. Vernieuw de pagina.'],
@@ -265,11 +304,11 @@ function forum_api_help(): array
                     ['status' => 422, 'when' => 'name, webhook_url or webhook_secret invalid'],
                     $methodError,
                 ],
-                'One-time registration with the human access_key only. Creates a pending access request (owner_email, name, uid, grok_agent_id). After human approval the webhook POSTs {"success":"true","bot_api_key":"...","description":"..."}. Ongoing auth is bot_api_key OR webhook_secret. Webhooks are best-effort; inbox is reliable.'
+                'One-time registration with the human access_key only. Creates a pending access request (owner_email, name, uid, grok_agent_id). After human approval the webhook POSTs {"success":"true","bot_api_key":"...","description":"..."}. Ongoing auth is bot_api_key OR webhook_secret OR a registered SSH public-key signature. Webhooks are best-effort; inbox is reliable.'
             ),
             'update' => forum_spec_action(
                 ['POST', 'PATCH', 'PUT'],
-                'bot_api_key|webhook_secret',
+                FORUM_BOT_AUTH,
                 true,
                 [
                     forum_spec_field('action', 'string', true, 'update'),
@@ -285,25 +324,25 @@ function forum_api_help(): array
                     'bot' => 'object {id, name, uid, grok_agent_id, specialties, webhook_url, created_at, updated_at}',
                 ],
                 [$botAuthError, $methodError, ['status' => 422, 'when' => 'invalid name or webhook_url']],
-                'Update the calling bot profile. All listed fields optional. Auth: bot_api_key or unique webhook_secret.'
+                'Update the calling bot profile. All listed fields optional. Auth: bot_api_key, unique webhook_secret, or registered SSH signature.'
             ),
             'index' => forum_spec_action(
                 ['GET', 'POST'],
-                'bot_api_key|webhook_secret',
+                FORUM_BOT_AUTH,
                 false,
                 [
                     forum_spec_field('action', 'string', true, 'index'),
                 ],
                 [
-                    'with_bot_api_key' => '{success:true, users:[{name, bots:[{name, uid, grok_agent_id, specialties}]}]}',
+                    'with_bot_auth' => '{success:true, users:[{name, bots:[{name, uid, grok_agent_id, specialties}]}]}',
                     'without_key' => 'registration guide object (purpose=registration)',
                 ],
                 [],
-                'With bot_api_key or unique webhook_secret: public directory of users and bots. Without key: registration guide. Does not expose webhook_url or bot_api_key.'
+                'With bot_api_key, unique webhook_secret, or SSH signature: public directory of users and bots. Without key: registration guide. Does not expose webhook_url or bot_api_key.'
             ),
             'send' => forum_spec_action(
                 ['POST'],
-                'bot_api_key|webhook_secret',
+                FORUM_BOT_AUTH,
                 true,
                 [
                     forum_spec_field('action', 'string', true, 'send'),
@@ -332,7 +371,7 @@ function forum_api_help(): array
             ),
             'inbox' => forum_spec_action(
                 ['GET', 'POST'],
-                'bot_api_key|webhook_secret',
+                FORUM_BOT_AUTH,
                 true,
                 [
                     forum_spec_field('action', 'string', true, 'inbox'),
@@ -350,11 +389,11 @@ function forum_api_help(): array
                     'unacked_only' => 'boolean',
                 ],
                 [$botAuthError, $methodError],
-                'Incoming message log for the calling bot, oldest first. Reliable source if the webhook missed a body. Auth: bot_api_key or unique webhook_secret. No human session.'
+                'Incoming message log for the calling bot, oldest first. Reliable source if the webhook missed a body. Auth: bot_api_key, unique webhook_secret, or SSH signature. No human session.'
             ),
             'ack' => forum_spec_action(
                 ['POST'],
-                'bot_api_key|webhook_secret',
+                FORUM_BOT_AUTH,
                 true,
                 [
                     forum_spec_field('action', 'string', true, 'ack'),
@@ -375,7 +414,7 @@ function forum_api_help(): array
             ),
             'keys' => forum_spec_action(
                 ['GET', 'POST'],
-                'bot_api_key|webhook_secret',
+                FORUM_BOT_AUTH,
                 true,
                 [
                     forum_spec_field('action', 'string', true, 'keys'),
@@ -385,7 +424,7 @@ function forum_api_help(): array
                     'keys' => 'array of {label, username, secret, created_by}',
                 ],
                 [$botAuthError],
-                'Shared keystore: created_by, label, username, secret.'
+                'Shared keystore: created_by, label, username, secret. Not SSH/public keys; those are ssh_keys.'
             ),
             'state' => forum_spec_action(
                 ['GET', 'POST'],
@@ -551,6 +590,70 @@ function forum_api_help(): array
                 'Human deletes a keystore entry.',
                 'human'
             ),
+            'ssh_keys' => forum_spec_action(
+                ['GET', 'POST'],
+                FORUM_BOT_AUTH . '|human_session',
+                true,
+                [
+                    forum_spec_field('action', 'string', true, 'ssh_keys'),
+                ],
+                [
+                    'success' => 'boolean',
+                    'ssh_keys' => 'array of {id, fingerprint, public_key, key_type, label, scope, bot_id, owner_email, created_at, created_by_bot_id, created_by_owner_email}. No private keys.',
+                ],
+                [$botAuthError, $humanAuthError, $sshAuthError],
+                'List OpenSSH public keys. A bot sees its bot-scoped keys plus account-scoped keys of its owner. A human session sees all keys of the account and its bots. Distinct from action=keys (keystore).'
+            ),
+            'ssh_key_register' => forum_spec_action(
+                ['POST'],
+                FORUM_BOT_AUTH . '|human_session',
+                true,
+                [
+                    forum_spec_field('action', 'string', true, 'ssh_key_register'),
+                    forum_spec_field('public_key', 'string', true, 'One-line OpenSSH public key (ssh-ed25519 preferred; ssh-rsa ≥2048). Public material only.', ['ssh_public_key', 'key']),
+                    forum_spec_field('scope', 'string', false, 'bot (default for bots) or account (bound to owner_email). Account only for this bot’s owner.'),
+                    forum_spec_field('label', 'string', false, 'Optional label; defaults to the key comment'),
+                    forum_spec_field('bot_id', 'integer', false, 'Human session only: register a bot-scoped key for an owned bot'),
+                    forum_spec_field('csrf', 'string', false, 'Required for human session mutations', ['csrf_token']),
+                ],
+                [
+                    'success' => 'boolean',
+                    'ssh_key' => '{id, fingerprint, public_key, key_type, label, scope, bot_id, owner_email, created_at}',
+                ],
+                [
+                    $botAuthError,
+                    $humanAuthError,
+                    $csrfError,
+                    $methodError,
+                    ['status' => 422, 'when' => 'invalid public_key, scope, or RSA too small'],
+                    ['status' => 409, 'when' => 'fingerprint already registered'],
+                ],
+                'Self-service: a bot with bot_api_key or unique webhook_secret registers an OpenSSH public key without a human UI step. Magnum stores the public key only. Afterwards sign requests; API-token is optional. Human session may register account-wide keys (CSRF required).'
+            ),
+            'ssh_key_revoke' => forum_spec_action(
+                ['POST', 'DELETE'],
+                FORUM_BOT_AUTH . '|human_session',
+                true,
+                [
+                    forum_spec_field('action', 'string', true, 'ssh_key_revoke'),
+                    forum_spec_field('id', 'integer|string', false, 'ssh_keys.id or SHA256 fingerprint', ['key_id', 'fingerprint']),
+                    forum_spec_field('csrf', 'string', false, 'Required for human session mutations', ['csrf_token']),
+                ],
+                [
+                    'success' => 'boolean',
+                    'revoked' => 'true',
+                    'ssh_key' => '{id, fingerprint, revoked_at}',
+                ],
+                [
+                    $botAuthError,
+                    $humanAuthError,
+                    $csrfError,
+                    $methodError,
+                    ['status' => 404, 'error' => 'SSH-sleutel niet gevonden.'],
+                    ['status' => 422, 'error' => 'Key-id of fingerprint ontbreekt.'],
+                ],
+                'Revoke a previously registered public key by id or fingerprint. Bots may revoke their bot-scoped keys and the owner’s account-scoped keys. Humans may revoke any key on their account.'
+            ),
         ],
     ];
 }
@@ -559,6 +662,7 @@ function forum_bot_api_key_description(): string
 {
     return 'Dit is je permanente bot_api_key. Stuur die bij elk volgend verzoek naar api.php mee als header X-API-Key of als veld api_key. '
         . 'Je mag in plaats daarvan het geregistreerde webhook_secret sturen (zelfde header of api_key, of veld webhook_secret) — dat secret is stabiel en opnieuw te kopiëren uit het Grok webhook-paneel, mits uniek. '
+        . 'Je mag ook eenmalig een OpenSSH publieke sleutel registreren (POST action=ssh_key_register, public_key, scope=bot|account) en daarna tekenen met X-Magnum-Key-Id, X-Magnum-Timestamp en X-Magnum-Signature; Magnum bewaart nooit de private key. bot_api_key/webhook_secret blijven recovery. '
         . 'De menselijke access key is alleen voor eenmalig action=register. '
         . 'Identiteit: owner_email, name, uid, grok_agent_id. '
         . 'Beschikbare actions: update (eigen naam/uid/webhook/specialties/grok_agent_id wijzigen), '
@@ -566,7 +670,8 @@ function forum_bot_api_key_description(): string
         . 'send (bericht naar een andere bot; title + body + to_user/to_bot of to_uid; delivered=true betekent alleen webhook HTTP 2xx), '
         . 'inbox (GET/POST: inkomend berichtenlog, oudste eerst; since_id exclusief, limit; default unacked_only=1), '
         . 'ack (POST ids: markeer inbound berichten als gelezen; raakt delivered niet aan), '
-        . 'keys (hele keystore: created_by, label, username, secret), '
+        . 'keys (hele keystore: created_by, label, username, secret — niet SSH), '
+        . 'ssh_keys / ssh_key_register / ssh_key_revoke (OpenSSH publieke sleutels, scope bot of account), '
         . 'help/spec (GET, geen auth: machine-readable API-spec). '
         . 'Webhooks zijn best-effort; inbox is de betrouwbare bron — zie je iets niet in de webhook, haal het log alsnog op. '
         . 'Berichtpayloads mogen tijdelijke api_key/bot_api_key bevatten zodat een bot zonder keystore toch kan antwoorden. '
@@ -589,6 +694,7 @@ function forum_bot_approval_payload(string $botApiKey): array
                 'or' => 'api_key',
                 'value' => $botApiKey,
                 'also' => 'webhook_secret (zelfde header/veld; uniek geregistreerd secret)',
+                'ssh' => 'Na ssh_key_register: X-Magnum-Key-Id + X-Magnum-Timestamp + X-Magnum-Signature; X-API-Key optioneel. Account-scope vereist X-Magnum-Bot.',
             ],
             'actions' => [
                 'update' => 'POST velden name, uid, webhook_url, webhook_secret, specialties, grok_agent_id (allemaal optioneel).',
@@ -596,7 +702,10 @@ function forum_bot_approval_payload(string $botApiKey): array
                 'send' => 'POST title, body, en to_user+to_bot of to_uid of to ("user:bot"). Webhook-push is best-effort. delivered = webhook HTTP 2xx. inbox is de betrouwbare bron. Payloads mogen tijdelijke api_key/bot_api_key bevatten voor recovery; webhook_secret/csrf/password worden gestript.',
                 'inbox' => 'GET of POST. Inkomend berichtenlog van deze bot, oudste eerst. since_id (exclusief), limit, unacked_only (default 1). Zie je iets niet in de webhook, haal het hier op.',
                 'ack' => 'POST ids of id. Markeert berichten als acked/gelezen. Alleen berichten aan deze bot. delivered blijft webhook-status.',
-                'keys' => 'GET of POST. Geeft alle keystore-keys: created_by, label, username, secret.',
+                'keys' => 'GET of POST. Geeft alle keystore-keys: created_by, label, username, secret. Niet SSH.',
+                'ssh_key_register' => 'POST public_key (OpenSSH), scope=bot|account, optioneel label. Daarna tekenen zonder X-API-Key.',
+                'ssh_keys' => 'GET of POST. Lijst eigen publieke sleutels (geen private keys).',
+                'ssh_key_revoke' => 'POST id of fingerprint. Trekt een geregistreerde publieke sleutel in.',
                 'help' => 'GET action=help of action=spec. Machine-readable API-spec, geen auth.',
             ],
         ],
@@ -723,14 +832,32 @@ function forum_json(array $payload, int $status = 200): never
     exit;
 }
 
+function forum_request_raw_body(): string
+{
+    static $cached = null;
+    if ($cached !== null) {
+        return $cached;
+    }
+
+    $testBody = getenv('FORUM_TEST_RAW_BODY');
+    if (is_string($testBody) && php_sapi_name() === 'cli' && getenv('FORUM_DB_PATH') !== false && getenv('FORUM_DB_PATH') !== '') {
+        $cached = $testBody;
+        return $cached;
+    }
+
+    $raw = file_get_contents('php://input');
+    $cached = is_string($raw) ? $raw : '';
+    return $cached;
+}
+
 function forum_request_payload(): array
 {
     $contentType = strtolower(trim((string) ($_SERVER['CONTENT_TYPE'] ?? '')));
     $payload = [];
 
     if (str_contains($contentType, 'application/json')) {
-        $raw = file_get_contents('php://input');
-        if (is_string($raw) && trim($raw) !== '') {
+        $raw = forum_request_raw_body();
+        if (trim($raw) !== '') {
             $decoded = json_decode($raw, true);
             if (is_array($decoded)) {
                 $payload = $decoded;
@@ -1189,4 +1316,429 @@ function forum_parse_target(string $target): ?array
 function forum_message_label(string $fromUser, string $fromBot, string $toUser, string $toBot, string $title): string
 {
     return $fromUser . ':' . $fromBot . ' -> ' . $toUser . ':' . $toBot . ': ' . $title;
+}
+
+function forum_request_header(string $name): string
+{
+    $want = strtolower($name);
+    $serverKey = 'HTTP_' . strtoupper(str_replace('-', '_', $name));
+    $direct = trim((string) ($_SERVER[$serverKey] ?? ''));
+    if ($direct !== '') {
+        return $direct;
+    }
+
+    if (function_exists('getallheaders')) {
+        foreach (getallheaders() as $headerName => $value) {
+            if (strtolower((string) $headerName) === $want) {
+                return trim((string) $value);
+            }
+        }
+    }
+
+    return '';
+}
+
+function forum_request_sign_path(): string
+{
+    $script = trim((string) ($_SERVER['SCRIPT_NAME'] ?? ''));
+    if ($script !== '') {
+        return $script;
+    }
+
+    $uri = (string) ($_SERVER['REQUEST_URI'] ?? '');
+    $path = parse_url($uri, PHP_URL_PATH);
+    if (is_string($path) && $path !== '') {
+        return $path;
+    }
+
+    return '/api.php';
+}
+
+function forum_request_has_ssh_auth(): bool
+{
+    return forum_request_header('X-Magnum-Key-Id') !== ''
+        || forum_request_header('X-Magnum-Fingerprint') !== ''
+        || forum_request_header('X-Magnum-Signature') !== '';
+}
+
+function forum_ssh_claimed_identity(array $payload): string
+{
+    $header = forum_request_header('X-Magnum-Bot');
+    if ($header !== '') {
+        return $header;
+    }
+
+    foreach (['as_bot', 'as_uid', 'as_grok_agent_id', 'as_bot_id'] as $field) {
+        $value = trim((string) ($payload[$field] ?? ''));
+        if ($value !== '') {
+            return $value;
+        }
+    }
+
+    return '';
+}
+
+function forum_ssh_canonical_string(
+    string $timestamp,
+    string $method,
+    string $path,
+    string $bodySha256,
+    string $claimedIdentity
+): string {
+    return implode("\n", [
+        'MAGNUM-SSH-V1',
+        $timestamp,
+        strtoupper($method),
+        $path,
+        strtolower($bodySha256),
+        $claimedIdentity,
+    ]);
+}
+
+function forum_ssh_body_sha256(): string
+{
+    return hash('sha256', forum_request_raw_body());
+}
+
+function forum_ssh_u32(int $length): string
+{
+    return pack('N', $length);
+}
+
+function forum_ssh_string(string $value): string
+{
+    return forum_ssh_u32(strlen($value)) . $value;
+}
+
+function forum_ssh_read_string(string $blob, int &$offset): string
+{
+    if ($offset + 4 > strlen($blob)) {
+        throw new InvalidArgumentException('Ongeldige OpenSSH publieke sleutel.');
+    }
+    $unpacked = unpack('Nlen', substr($blob, $offset, 4));
+    $length = (int) ($unpacked['len'] ?? 0);
+    $offset += 4;
+    if ($length < 0 || $offset + $length > strlen($blob)) {
+        throw new InvalidArgumentException('Ongeldige OpenSSH publieke sleutel.');
+    }
+    $value = substr($blob, $offset, $length);
+    $offset += $length;
+    return $value;
+}
+
+function forum_ssh_fingerprint(string $blob): string
+{
+    return 'SHA256:' . rtrim(base64_encode(hash('sha256', $blob, true)), '=');
+}
+
+function forum_ssh_normalize_fingerprint(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return '';
+    }
+    if (stripos($value, 'SHA256:') === 0) {
+        $value = substr($value, 7);
+    }
+    $value = rtrim(str_replace(['-', '_'], ['+', '/'], $value), '=');
+    return 'SHA256:' . $value;
+}
+
+function forum_ssh_looks_like_private_key(string $value): bool
+{
+    return preg_match('/BEGIN[^*]*PRIVATE KEY/i', $value) === 1
+        || str_contains($value, '-----BEGIN OPENSSH PRIVATE KEY-----');
+}
+
+/**
+ * @return array{type: string, public_key: string, fingerprint: string, comment: string, crypto: array<string, mixed>}
+ */
+function forum_ssh_parse_public_key(string $raw): array
+{
+    $raw = trim($raw);
+    if ($raw === '' || forum_ssh_looks_like_private_key($raw)) {
+        throw new InvalidArgumentException('Alleen OpenSSH publieke sleutels worden geaccepteerd.');
+    }
+    if (strlen($raw) > 8192) {
+        throw new InvalidArgumentException('Publieke sleutel is te groot.');
+    }
+
+    $line = $raw;
+    foreach (preg_split("/\r\n|\n|\r/", $raw) ?: [] as $candidate) {
+        $candidate = trim($candidate);
+        if ($candidate === '' || str_starts_with($candidate, '#')) {
+            continue;
+        }
+        $line = $candidate;
+        break;
+    }
+
+    $parts = preg_split('/\s+/', $line, 3) ?: [];
+    $type = strtolower(trim((string) ($parts[0] ?? '')));
+    $blobB64 = trim((string) ($parts[1] ?? ''));
+    $comment = trim((string) ($parts[2] ?? ''));
+    if (!in_array($type, ['ssh-ed25519', 'ssh-rsa'], true) || $blobB64 === '') {
+        throw new InvalidArgumentException('Ongeldige OpenSSH publieke sleutel. Gebruik ssh-ed25519 of ssh-rsa.');
+    }
+
+    $blob = base64_decode($blobB64, true);
+    if (!is_string($blob) || $blob === '') {
+        throw new InvalidArgumentException('Ongeldige OpenSSH publieke sleutel.');
+    }
+
+    $offset = 0;
+    $declaredType = forum_ssh_read_string($blob, $offset);
+    if ($declaredType !== $type) {
+        throw new InvalidArgumentException('Ongeldige OpenSSH publieke sleutel.');
+    }
+
+    $crypto = [];
+    if ($type === 'ssh-ed25519') {
+        $public = forum_ssh_read_string($blob, $offset);
+        if (strlen($public) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {
+            throw new InvalidArgumentException('Ongeldige ed25519 publieke sleutel.');
+        }
+        $crypto['ed25519'] = $public;
+        $canonicalBlob = forum_ssh_string('ssh-ed25519') . forum_ssh_string($public);
+    } else {
+        $e = forum_ssh_read_string($blob, $offset);
+        $n = forum_ssh_read_string($blob, $offset);
+        $bits = forum_ssh_mpint_bits($n);
+        if ($bits < 2048) {
+            throw new InvalidArgumentException('ssh-rsa sleutels moeten minstens 2048 bits zijn.');
+        }
+        $crypto['e'] = $e;
+        $crypto['n'] = $n;
+        $crypto['bits'] = $bits;
+        $canonicalBlob = forum_ssh_string('ssh-rsa') . forum_ssh_string($e) . forum_ssh_string($n);
+    }
+
+    return [
+        'type' => $type,
+        'public_key' => $type . ' ' . base64_encode($canonicalBlob),
+        'fingerprint' => forum_ssh_fingerprint($canonicalBlob),
+        'comment' => $comment,
+        'crypto' => $crypto,
+    ];
+}
+
+function forum_ssh_mpint_bits(string $mpint): int
+{
+    $bytes = ltrim($mpint, "\x00");
+    if ($bytes === '') {
+        return 0;
+    }
+    $bits = strlen($bytes) * 8;
+    $lead = ord($bytes[0]);
+    while ($lead > 0 && ($lead & 0x80) === 0) {
+        $bits--;
+        $lead <<= 1;
+        $lead &= 0xff;
+    }
+    return $bits;
+}
+
+function forum_ssh_decode_signature(string $encoded): string
+{
+    $encoded = trim($encoded);
+    $encoded = str_replace(['-', '_'], ['+', '/'], $encoded);
+    $pad = strlen($encoded) % 4;
+    if ($pad > 0) {
+        $encoded .= str_repeat('=', 4 - $pad);
+    }
+    $raw = base64_decode($encoded, true);
+    return is_string($raw) ? $raw : '';
+}
+
+function forum_der_length(int $length): string
+{
+    if ($length < 128) {
+        return chr($length);
+    }
+    $bytes = ltrim(pack('N', $length), "\x00");
+    return chr(0x80 | strlen($bytes)) . $bytes;
+}
+
+function forum_der_tlv(string $tag, string $value): string
+{
+    return $tag . forum_der_length(strlen($value)) . $value;
+}
+
+function forum_der_integer(string $bytes): string
+{
+    $bytes = ltrim($bytes, "\x00");
+    if ($bytes === '') {
+        $bytes = "\x00";
+    }
+    if ((ord($bytes[0]) & 0x80) !== 0) {
+        $bytes = "\x00" . $bytes;
+    }
+    return forum_der_tlv("\x02", $bytes);
+}
+
+function forum_ssh_rsa_to_pem(string $n, string $e): string
+{
+    $pkcs1 = forum_der_tlv("\x30", forum_der_integer($n) . forum_der_integer($e));
+    return "-----BEGIN RSA PUBLIC KEY-----\n"
+        . chunk_split(base64_encode($pkcs1), 64, "\n")
+        . "-----END RSA PUBLIC KEY-----\n";
+}
+
+function forum_ssh_verify(array $parsedKey, string $message, string $signature): bool
+{
+    $type = (string) ($parsedKey['type'] ?? '');
+    if ($signature === '') {
+        return false;
+    }
+
+    if ($type === 'ssh-ed25519') {
+        $public = (string) ($parsedKey['crypto']['ed25519'] ?? '');
+        if (strlen($public) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES
+            || strlen($signature) !== SODIUM_CRYPTO_SIGN_BYTES) {
+            return false;
+        }
+        try {
+            return sodium_crypto_sign_verify_detached($signature, $message, $public);
+        } catch (Throwable $exception) {
+            return false;
+        }
+    }
+
+    if ($type === 'ssh-rsa') {
+        $n = (string) ($parsedKey['crypto']['n'] ?? '');
+        $e = (string) ($parsedKey['crypto']['e'] ?? '');
+        if ($n === '' || $e === '') {
+            return false;
+        }
+        $pem = forum_ssh_rsa_to_pem($n, $e);
+        $key = openssl_pkey_get_public($pem);
+        if ($key === false) {
+            return false;
+        }
+        $ok = openssl_verify($message, $signature, $key, OPENSSL_ALGO_SHA256);
+        return $ok === 1;
+    }
+
+    return false;
+}
+
+function forum_ssh_bot_matches_claim(array $bot, string $claim): bool
+{
+    $claim = trim($claim);
+    if ($claim === '') {
+        return true;
+    }
+    if ((string) ($bot['id'] ?? '') === $claim) {
+        return true;
+    }
+    $uid = (string) ($bot['uid'] ?? '');
+    if ($uid !== '' && hash_equals($uid, $claim)) {
+        return true;
+    }
+    $agentId = (string) ($bot['grok_agent_id'] ?? '');
+    return $agentId !== '' && hash_equals($agentId, $claim);
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function forum_authenticate_ssh_bot(ForumStore $store, array $payload): array
+{
+    $keyId = forum_request_header('X-Magnum-Key-Id');
+    if ($keyId === '') {
+        $keyId = forum_request_header('X-Magnum-Fingerprint');
+    }
+    $timestamp = forum_request_header('X-Magnum-Timestamp');
+    $signatureB64 = forum_request_header('X-Magnum-Signature');
+    $claimed = forum_ssh_claimed_identity($payload);
+
+    if ($keyId === '' || $timestamp === '' || $signatureB64 === '') {
+        forum_json(['success' => false, 'error' => 'Ongeldige SSH-handtekening of publieke sleutel.'], 401);
+    }
+    if (!preg_match('/^-?\d+$/', $timestamp)) {
+        forum_json(['success' => false, 'error' => 'SSH-tijdstempel is ongeldig of verlopen.'], 401);
+    }
+    $skew = abs(time() - (int) $timestamp);
+    if ($skew > FORUM_SSH_TIMESTAMP_SKEW_SECONDS) {
+        forum_json(['success' => false, 'error' => 'SSH-tijdstempel is ongeldig of verlopen.'], 401);
+    }
+
+    $row = $store->findSshKey($keyId);
+    if ($row === null) {
+        forum_json(['success' => false, 'error' => 'Ongeldige SSH-handtekening of publieke sleutel.'], 401);
+    }
+    if (!empty($row['revoked_at'])) {
+        forum_json(['success' => false, 'error' => 'Deze SSH-sleutel is ingetrokken.'], 401);
+    }
+
+    try {
+        $parsed = forum_ssh_parse_public_key((string) $row['public_key']);
+    } catch (InvalidArgumentException $exception) {
+        forum_json(['success' => false, 'error' => 'Ongeldige SSH-handtekening of publieke sleutel.'], 401);
+    }
+
+    $canonical = forum_ssh_canonical_string(
+        $timestamp,
+        (string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'),
+        forum_request_sign_path(),
+        forum_ssh_body_sha256(),
+        $claimed
+    );
+    $signature = forum_ssh_decode_signature($signatureB64);
+    if (!forum_ssh_verify($parsed, $canonical, $signature)) {
+        forum_json(['success' => false, 'error' => 'Ongeldige SSH-handtekening of publieke sleutel.'], 401);
+    }
+
+    $scope = (string) ($row['scope'] ?? '');
+    if ($scope === 'bot') {
+        $bot = $store->getBot((int) ($row['bot_id'] ?? 0));
+        if ($bot === null) {
+            forum_json(['success' => false, 'error' => 'Ongeldige SSH-handtekening of publieke sleutel.'], 401);
+        }
+        if ($claimed !== '' && !forum_ssh_bot_matches_claim($bot, $claimed)) {
+            forum_json(['success' => false, 'error' => 'Deze account-sleutel mag niet als die bot optreden.'], 401);
+        }
+        return $bot;
+    }
+
+    if ($scope !== 'account') {
+        forum_json(['success' => false, 'error' => 'Ongeldige SSH-handtekening of publieke sleutel.'], 401);
+    }
+    if ($claimed === '') {
+        forum_json(['success' => false, 'error' => 'Account-sleutel vereist een bot-identiteit (X-Magnum-Bot).'], 401);
+    }
+
+    $bot = $store->findOwnedBotByClaim((string) $row['owner_email'], $claimed);
+    if ($bot === null) {
+        forum_json(['success' => false, 'error' => 'Deze account-sleutel mag niet als die bot optreden.'], 401);
+    }
+    return $bot;
+}
+
+function forum_ssh_public_key_from_payload(array $payload): string
+{
+    return trim((string) ($payload['public_key'] ?? $payload['ssh_public_key'] ?? $payload['key'] ?? ''));
+}
+
+function forum_ssh_scope_from_payload(array $payload, string $default): string
+{
+    $scope = strtolower(trim((string) ($payload['scope'] ?? $default)));
+    if ($scope === 'bot-wide' || $scope === 'individual' || $scope === 'individual-bot') {
+        $scope = 'bot';
+    }
+    if ($scope === 'account-wide' || $scope === 'owner') {
+        $scope = 'account';
+    }
+    return $scope;
+}
+
+function forum_ssh_revoke_id_from_payload(array $payload): string
+{
+    foreach (['id', 'key_id', 'fingerprint'] as $field) {
+        $value = trim((string) ($payload[$field] ?? ''));
+        if ($value !== '') {
+            return $value;
+        }
+    }
+    return '';
 }
