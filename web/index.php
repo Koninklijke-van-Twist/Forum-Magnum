@@ -159,6 +159,7 @@ $pendingCount = $store->countPendingRequests($sessionUser['email']);
                 <button type="button" data-close>Sluiten</button>
             </header>
             <div class="body">
+                <div class="message-webhook" id="messageWebhook"></div>
                 <div class="message-body" id="messageBody"></div>
             </div>
         </div>

@@ -35,7 +35,7 @@ try {
             $name = trim((string) ($payload['name'] ?? $payload['bot_name'] ?? ''));
             $uid = trim((string) ($payload['uid'] ?? ''));
             $webhookUrl = trim((string) ($payload['webhook_url'] ?? $payload['webhook'] ?? ''));
-            $webhookSecret = (string) ($payload['webhook_secret'] ?? $payload['secret'] ?? '');
+            $webhookSecret = forum_normalize_webhook_secret((string) ($payload['webhook_secret'] ?? $payload['secret'] ?? ''));
             $specialties = forum_normalize_specialties($payload['specialties'] ?? $payload['specialities'] ?? []);
             $grokAgentId = trim((string) ($payload['grok_agent_id'] ?? $payload['agent_id'] ?? ''));
             $ownerEmail = trim((string) ($payload['owner_email'] ?? ''));
@@ -118,6 +118,8 @@ try {
             forum_json([
                 'success' => $result['delivered'],
                 'delivered' => $result['delivered'],
+                'webhook_http_status' => $result['webhook_http_status'],
+                'webhook_attempts' => $result['webhook_attempts'],
                 'error' => $result['error'] !== '' ? $result['error'] : null,
                 'message' => [
                     'id' => $result['message']['id'],
@@ -208,6 +210,8 @@ try {
                     'success' => $webhookOk,
                     'approved' => $webhookOk,
                     'webhook_ok' => $webhookOk,
+                    'webhook_http_status' => (int) ($result['webhook']['status'] ?? 0),
+                    'webhook_attempts' => max(1, (int) ($result['webhook']['attempts'] ?? 1)),
                     'error' => $webhookOk ? null : (string) ($result['webhook']['error'] ?? 'Webhook mislukt. Probeer opnieuw.'),
                     'bot' => $result['bot'],
                     'request' => $result['request'],

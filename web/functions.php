@@ -1,6 +1,9 @@
 <?php
 
 const FORUM_WEBHOOK_TIMEOUT_SECONDS = 8;
+const FORUM_WEBHOOK_CONNECT_TIMEOUT_SECONDS = 3;
+const FORUM_WEBHOOK_MAX_ATTEMPTS = 2;
+const FORUM_WEBHOOK_RETRY_DELAY_MICROSECONDS = 250000;
 
 function forum_request_wants_json(): bool
 {
@@ -143,8 +146,11 @@ function forum_api_help(): array
         'delivery' => [
             'webhooks' => 'best-effort',
             'reliable_source' => 'inbox',
+            'success_means' => 'webhook HTTP 2xx only; not proof a Cursor routine ran or saw the body',
+            'retries' => '1 extra attempt on connection error, timeout, HTTP 408, 429, or 5xx',
+            'timeout_seconds' => FORUM_WEBHOOK_TIMEOUT_SECONDS,
             'temporary_api_keys' => 'Message payloads may include api_key or bot_api_key as a temporary reply key when a bot lost its keystore. Those keys are kept. Only true secrets (webhook_secret, csrf, password, authorization, secret) are stripped.',
-            'note' => 'Webhooks zijn best-effort. inbox is de betrouwbare bron: zie je een bericht niet in de webhook, haal het inkomend berichtenlog op (since_id/limit) en ack wat je verwerkt hebt. Payloads mogen tijdelijke API-keys bevatten voor recovery.',
+            'note' => 'Webhooks zijn best-effort. inbox is de betrouwbare bron: zie je een bericht niet in de webhook, haal het inkomend berichtenlog op (since_id/limit) en ack wat je verwerkt hebt. Payloads mogen tijdelijke API-keys bevatten voor recovery. delivered=true betekent alleen webhook HTTP 2xx.',
         ],
         'auth' => [
             'header' => 'X-API-Key',
@@ -311,7 +317,9 @@ function forum_api_help(): array
                 [
                     'success' => 'boolean (true only if webhook HTTP 2xx)',
                     'delivered' => 'boolean (webhook HTTP 2xx only; not proof the peer bot saw the body)',
-                    'error' => 'string|null',
+                    'webhook_http_status' => 'integer (0 when the TCP/TLS request failed)',
+                    'webhook_attempts' => 'integer (1 or 2)',
+                    'error' => 'string|null (HTTP status plus truncated response body on failure)',
                     'message' => '{id, label}',
                 ],
                 [
@@ -747,13 +755,14 @@ function forum_request_bot_credential(array $payload, string $action): string
 {
     $key = forum_request_api_key($payload);
     if ($key !== '') {
-        return $key;
+        $normalized = forum_normalize_webhook_secret($key);
+        return $normalized !== '' ? $normalized : $key;
     }
     if ($action === 'register') {
         return '';
     }
 
-    return trim((string) ($payload['webhook_secret'] ?? ''));
+    return forum_normalize_webhook_secret((string) ($payload['webhook_secret'] ?? ''));
 }
 
 function forum_request_api_key(array $payload = []): string
@@ -918,33 +927,158 @@ function forum_csrf_is_valid(string $token): bool
     return $expected !== '' && hash_equals($expected, $token);
 }
 
+function forum_normalize_webhook_secret(string $secret): string
+{
+    $secret = trim($secret);
+    if ($secret === '') {
+        return '';
+    }
+
+    if (preg_match('/\AAuthorization:\s*/i', $secret) === 1) {
+        $secret = trim((string) preg_replace('/\AAuthorization:\s*/i', '', $secret));
+    }
+    if (preg_match('/\ABearer\s+/i', $secret) === 1) {
+        $secret = trim((string) preg_replace('/\ABearer\s+/i', '', $secret));
+    }
+    $secret = trim($secret, " \t\"'");
+
+    if ($secret === '' || preg_match('/[\r\n]/', $secret) === 1) {
+        return '';
+    }
+
+    return $secret;
+}
+
 /**
- * @return array{ok: bool, status: int, error: string, body: string}
+ * @param array{ok?: mixed, status?: mixed} $result
+ */
+function forum_webhook_is_retryable(array $result): bool
+{
+    if (!empty($result['ok'])) {
+        return false;
+    }
+
+    $status = (int) ($result['status'] ?? 0);
+    if ($status === 0) {
+        return true;
+    }
+
+    return $status === 408 || $status === 429 || ($status >= 500 && $status <= 599);
+}
+
+function forum_webhook_body_snippet(string $body): string
+{
+    $body = trim((string) preg_replace('/\s+/', ' ', $body));
+    if ($body === '') {
+        return '';
+    }
+    if (strlen($body) > 180) {
+        return substr($body, 0, 180) . '…';
+    }
+
+    return $body;
+}
+
+function forum_webhook_failure_error(int $status, string $transportError, string $body): string
+{
+    if ($transportError !== '') {
+        $error = $transportError;
+        if ($status > 0) {
+            $error .= ' (HTTP ' . $status . ')';
+        }
+    } else {
+        $error = 'Webhook faalde' . ($status > 0 ? ' (HTTP ' . $status . ')' : '') . '.';
+    }
+
+    $snippet = forum_webhook_body_snippet($body);
+    if ($snippet !== '') {
+        $error .= ' ' . $snippet;
+    }
+
+    return $error;
+}
+
+function forum_webhook_log(string $url, array $result, int $attempt): void
+{
+    $parts = parse_url($url);
+    $host = (string) ($parts['host'] ?? '');
+    $path = (string) ($parts['path'] ?? '/');
+    $ok = !empty($result['ok']) ? 'ok' : 'fail';
+    $status = (int) ($result['status'] ?? 0);
+    $error = forum_webhook_body_snippet((string) ($result['error'] ?? ''));
+    $line = 'Forum Magnum webhook ' . $ok
+        . ' attempt=' . $attempt
+        . ' HTTP ' . $status
+        . ' POST ' . $host . $path;
+    if ($error !== '' && empty($result['ok'])) {
+        $line .= ' error=' . $error;
+    }
+    error_log($line);
+}
+
+/**
+ * @return array{ok: bool, status: int, error: string, body: string, attempts: int}
  */
 function forum_post_webhook(string $url, array $payload, string $secret, int $timeout = FORUM_WEBHOOK_TIMEOUT_SECONDS): array
 {
+    $secret = forum_normalize_webhook_secret($secret);
+    $last = [
+        'ok' => false,
+        'status' => 0,
+        'error' => 'Webhook kon niet worden verstuurd.',
+        'body' => '',
+        'attempts' => 0,
+    ];
+
+    $maxAttempts = max(1, FORUM_WEBHOOK_MAX_ATTEMPTS);
+    for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+        $last = forum_post_webhook_once($url, $payload, $secret, $timeout);
+        $last['attempts'] = $attempt;
+        forum_webhook_log($url, $last, $attempt);
+        if (!empty($last['ok']) || $attempt >= $maxAttempts || !forum_webhook_is_retryable($last)) {
+            break;
+        }
+        usleep(FORUM_WEBHOOK_RETRY_DELAY_MICROSECONDS * $attempt);
+    }
+
+    return $last;
+}
+
+/**
+ * @return array{ok: bool, status: int, error: string, body: string, attempts: int}
+ */
+function forum_post_webhook_once(string $url, array $payload, string $secret, int $timeout): array
+{
     $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if (!is_string($jsonPayload) || $jsonPayload === '') {
-        return ['ok' => false, 'status' => 0, 'error' => 'Webhook-payload kon niet worden gecodeerd.', 'body' => ''];
+        return ['ok' => false, 'status' => 0, 'error' => 'Webhook-payload kon niet worden gecodeerd.', 'body' => '', 'attempts' => 1];
     }
 
     $headers = [
         'Content-Type: application/json',
         'Accept: application/json',
         'User-Agent: Forum-Magnum-Webhook/1.0',
+        'Expect:',
     ];
     if ($secret !== '') {
         $headers[] = 'Authorization: Bearer ' . $secret;
     }
 
+    $connectTimeout = min($timeout, FORUM_WEBHOOK_CONNECT_TIMEOUT_SECONDS);
+
     if (!function_exists('curl_init')) {
         $raw = @file_get_contents($url, false, stream_context_create([
             'http' => [
                 'method' => 'POST',
-                'header' => implode("\r\n", $headers),
+                'header' => implode("\r\n", $headers) . "\r\n",
                 'content' => $jsonPayload,
                 'timeout' => $timeout,
                 'ignore_errors' => true,
+                'follow_location' => 0,
+            ],
+            'ssl' => [
+                'verify_peer' => true,
+                'verify_peer_name' => true,
             ],
         ]));
         $status = 0;
@@ -955,29 +1089,41 @@ function forum_post_webhook(string $url, array $payload, string $secret, int $ti
                 }
             }
         }
+        $body = is_string($raw) ? $raw : '';
         $ok = $raw !== false && $status >= 200 && $status < 300;
         return [
             'ok' => $ok,
             'status' => $status,
-            'error' => $ok ? '' : ('Webhook faalde' . ($status > 0 ? ' (HTTP ' . $status . ')' : '') . '.'),
-            'body' => is_string($raw) ? $raw : '',
+            'error' => $ok ? '' : forum_webhook_failure_error(
+                $status,
+                $raw === false ? 'Webhook-verbinding mislukt.' : '',
+                $body
+            ),
+            'body' => $body,
+            'attempts' => 1,
         ];
     }
 
     $curl = curl_init($url);
     if ($curl === false) {
-        return ['ok' => false, 'status' => 0, 'error' => 'Webhook kon niet worden gestart.', 'body' => ''];
+        return ['ok' => false, 'status' => 0, 'error' => 'Webhook kon niet worden gestart.', 'body' => '', 'attempts' => 1];
     }
 
-    curl_setopt_array($curl, [
+    $options = [
         CURLOPT_POST => true,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => $headers,
         CURLOPT_POSTFIELDS => $jsonPayload,
         CURLOPT_TIMEOUT => $timeout,
-        CURLOPT_CONNECTTIMEOUT => $timeout,
+        CURLOPT_CONNECTTIMEOUT => $connectTimeout,
         CURLOPT_FOLLOWLOCATION => false,
-    ]);
+        CURLOPT_NOSIGNAL => true,
+    ];
+    if (defined('CURLPROTO_HTTP') && defined('CURLPROTO_HTTPS')) {
+        $options[CURLOPT_PROTOCOLS] = CURLPROTO_HTTP | CURLPROTO_HTTPS;
+        $options[CURLOPT_REDIR_PROTOCOLS] = CURLPROTO_HTTPS;
+    }
+    curl_setopt_array($curl, $options);
 
     $raw = curl_exec($curl);
     $status = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
@@ -988,23 +1134,31 @@ function forum_post_webhook(string $url, array $payload, string $secret, int $ti
         return [
             'ok' => false,
             'status' => $status,
-            'error' => $curlError !== '' ? $curlError : 'Webhook-verbinding mislukt.',
+            'error' => forum_webhook_failure_error(
+                $status,
+                $curlError !== '' ? $curlError : 'Webhook-verbinding mislukt.',
+                ''
+            ),
             'body' => '',
+            'attempts' => 1,
         ];
     }
 
     $ok = $status >= 200 && $status < 300;
+    $body = (string) $raw;
     return [
         'ok' => $ok,
         'status' => $status,
-        'error' => $ok ? '' : ('Webhook faalde (HTTP ' . $status . ').'),
-        'body' => (string) $raw,
+        'error' => $ok ? '' : forum_webhook_failure_error($status, '', $body),
+        'body' => $body,
+        'attempts' => 1,
     ];
 }
 
 function forum_is_valid_webhook_url(string $url): bool
 {
-    if ($url === '' || !filter_var($url, FILTER_VALIDATE_URL)) {
+    $url = trim($url);
+    if ($url === '' || preg_match('/[\r\n]/', $url) === 1 || !filter_var($url, FILTER_VALIDATE_URL)) {
         return false;
     }
 

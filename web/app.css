@@ -343,10 +343,23 @@ button:disabled {
     color: var(--muted);
     font-size: 12px;
     white-space: nowrap;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+}
+
+.log-row .webhook-status {
+    font-size: 11px;
+    text-transform: lowercase;
 }
 
 .log-row.is-failed {
     background: var(--danger-soft);
+}
+
+.log-row.is-failed .webhook-status {
+    color: var(--danger);
 }
 
 .modal-backdrop {
@@ -398,6 +411,20 @@ button:disabled {
 
 .modal .body {
     padding: 16px 18px;
+}
+
+.message-webhook {
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--ok-soft);
+    color: var(--ok);
+    font-size: 13px;
+}
+
+.message-webhook.is-failed {
+    background: var(--danger-soft);
+    color: var(--danger);
 }
 
 .access-key-box,
