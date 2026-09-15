@@ -30,6 +30,7 @@
         messageModal: document.getElementById('messageModal'),
         messageTitle: document.getElementById('messageTitle'),
         messageBody: document.getElementById('messageBody'),
+        messageWebhook: document.getElementById('messageWebhook'),
         botEditModal: document.getElementById('botEditModal'),
         botEditId: document.getElementById('botEditId'),
         botEditName: document.getElementById('botEditName'),
@@ -160,10 +161,16 @@
         }
         els.logList.innerHTML = state.messages.map(function (message) {
             const failed = message.delivered ? '' : ' is-failed';
+            const webhookNote = message.delivered
+                ? 'Webhook HTTP 2xx'
+                : (message.delivery_error || 'Webhook mislukt');
             return (
-                '<button type="button" class="log-row' + failed + '" data-message-id="' + message.id + '">' +
+                '<button type="button" class="log-row' + failed + '" data-message-id="' + message.id + '" title="' + escapeHtml(webhookNote) + '">' +
                     '<span class="label">' + escapeHtml(message.label) + '</span>' +
-                    '<span class="time">' + escapeHtml(formatTime(message.created_at)) + '</span>' +
+                    '<span class="time">' +
+                        escapeHtml(formatTime(message.created_at)) +
+                        '<span class="webhook-status">' + escapeHtml(message.delivered ? 'HTTP 2xx' : 'webhook fout') + '</span>' +
+                    '</span>' +
                 '</button>'
             );
         }).join('');
@@ -354,6 +361,12 @@
                 if (els.messageTitle) {
                     els.messageTitle.textContent = data.message.label;
                 }
+                if (els.messageWebhook) {
+                    els.messageWebhook.classList.toggle('is-failed', !data.message.delivered);
+                    els.messageWebhook.textContent = data.message.delivered
+                        ? 'Webhook: HTTP 2xx — dat is geen bewijs dat de bot het bericht zag. inbox blijft de betrouwbare bron.'
+                        : ('Webhook mislukt: ' + (data.message.delivery_error || 'geen details'));
+                }
                 if (els.messageBody) {
                     els.messageBody.textContent = data.message.body || '';
                 }
@@ -367,7 +380,7 @@
             target.disabled = true;
             api('request_decide', { id: Number(approveId), decision: 'approve' }).then(function (data) {
                 if (data.approved && data.webhook_ok) {
-                    showFlash('Bot geaccepteerd en API-key verstuurd.', true);
+                    showFlash('Bot geaccepteerd. Webhook HTTP ' + (data.webhook_http_status || 200) + ' — geen bewijs dat de bot de API-key ontving.', true);
                 } else {
                     showFlash(data.error || 'Accepteren mislukt. Het verzoek blijft openstaan.', false);
                 }

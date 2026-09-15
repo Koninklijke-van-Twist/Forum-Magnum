@@ -109,6 +109,7 @@ class ForumStore
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC)');
         $this->ensureMessagesAckedColumn();
         $this->ensureGrokAgentIdColumns();
+        $this->normalizeStoredWebhookSecrets();
 
         $this->pdo->exec(
             'CREATE TABLE IF NOT EXISTS keystore (
@@ -136,6 +137,29 @@ class ForumStore
             $this->pdo->exec('ALTER TABLE messages ADD COLUMN acked INTEGER NOT NULL DEFAULT 0');
         }
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_messages_inbox ON messages(to_user, to_bot, acked, id)');
+    }
+
+    private function normalizeStoredWebhookSecrets(): void
+    {
+        foreach (['bots', 'access_requests'] as $table) {
+            $rows = $this->pdo->query('SELECT id, webhook_secret FROM ' . $table)->fetchAll();
+            if (!is_array($rows)) {
+                continue;
+            }
+            $update = $this->pdo->prepare(
+                'UPDATE ' . $table . ' SET webhook_secret = :secret WHERE id = :id'
+            );
+            foreach ($rows as $row) {
+                $current = (string) ($row['webhook_secret'] ?? '');
+                $normalized = forum_normalize_webhook_secret($current);
+                if ($normalized !== $current) {
+                    $update->execute([
+                        ':secret' => $normalized,
+                        ':id' => (int) $row['id'],
+                    ]);
+                }
+            }
+        }
     }
 
     private function ensureKeystoreUsernameColumn(): void
@@ -274,8 +298,16 @@ class ForumStore
         $name = trim($name);
         $uid = trim($uid);
         $grokAgentId = trim($grokAgentId);
+        $webhookUrl = trim($webhookUrl);
+        $webhookSecret = forum_normalize_webhook_secret($webhookSecret);
         if ($ownerEmail === '' || $name === '') {
             throw new InvalidArgumentException('Naam van bot en eigenaar zijn verplicht.');
+        }
+        if (!forum_is_valid_webhook_url($webhookUrl)) {
+            throw new InvalidArgumentException('Ongeldige webhook-url.');
+        }
+        if ($webhookSecret === '') {
+            throw new InvalidArgumentException('Webhook secret is verplicht.');
         }
 
         $this->assertUidAvailable($uid, null, null);
@@ -551,8 +583,8 @@ class ForumStore
      */
     public function findBotByWebhookSecret(string $secret): ?array
     {
-        $secret = (string) $secret;
-        if (trim($secret) === '') {
+        $secret = forum_normalize_webhook_secret($secret);
+        if ($secret === '') {
             return null;
         }
 
@@ -642,7 +674,14 @@ class ForumStore
         $name = array_key_exists('name', $fields) ? trim((string) $fields['name']) : (string) $bot['name'];
         $uid = array_key_exists('uid', $fields) ? trim((string) $fields['uid']) : (string) $bot['uid'];
         $webhookUrl = array_key_exists('webhook_url', $fields) ? trim((string) $fields['webhook_url']) : (string) $bot['webhook_url'];
-        $webhookSecret = array_key_exists('webhook_secret', $fields) ? (string) $fields['webhook_secret'] : (string) $bot['webhook_secret'];
+        if (array_key_exists('webhook_secret', $fields)) {
+            $webhookSecret = forum_normalize_webhook_secret((string) $fields['webhook_secret']);
+            if ($webhookSecret === '') {
+                throw new InvalidArgumentException('Webhook secret is verplicht.');
+            }
+        } else {
+            $webhookSecret = forum_normalize_webhook_secret((string) $bot['webhook_secret']);
+        }
         $grokAgentId = array_key_exists('grok_agent_id', $fields)
             ? trim((string) $fields['grok_agent_id'])
             : (string) $bot['grok_agent_id'];
@@ -741,7 +780,7 @@ class ForumStore
 
     /**
      * @param array<string, mixed> $payload
-     * @return array{message: array<string, mixed>, delivered: bool, error: string}
+     * @return array{message: array<string, mixed>, delivered: bool, error: string, webhook_http_status: int, webhook_attempts: int}
      */
     public function sendMessage(array $fromBot, array $payload): array
     {
@@ -807,13 +846,23 @@ class ForumStore
             (string) $target['webhook_secret']
         );
 
+        $deliveryError = '';
+        if (empty($webhook['ok'])) {
+            $deliveryError = (string) $webhook['error'];
+            $attempts = max(1, (int) ($webhook['attempts'] ?? 1));
+            if ($attempts > 1) {
+                $deliveryError .= ' [' . $attempts . ' pogingen]';
+            }
+        }
+
         $this->pdo->prepare(
             'UPDATE messages SET delivered = :delivered, delivery_error = :error WHERE id = :id'
         )->execute([
             ':delivered' => $webhook['ok'] ? 1 : 0,
-            ':error' => $webhook['ok'] ? '' : (string) $webhook['error'],
+            ':error' => $deliveryError,
             ':id' => $messageId,
         ]);
+        $error = $deliveryError;
 
         $message = $this->getMessage($messageId);
         if ($message === null) {
@@ -823,7 +872,9 @@ class ForumStore
         return [
             'message' => $message,
             'delivered' => $webhook['ok'],
-            'error' => $webhook['ok'] ? '' : (string) $webhook['error'],
+            'error' => $error,
+            'webhook_http_status' => (int) ($webhook['status'] ?? 0),
+            'webhook_attempts' => max(1, (int) ($webhook['attempts'] ?? 1)),
         ];
     }
 
@@ -1130,20 +1181,23 @@ class ForumStore
     }
 
     /**
-     * @return array{ok: bool, status: int, error: string, body: string}
+     * @return array{ok: bool, status: int, error: string, body: string, attempts: int}
      */
     private function deliver(string $url, array $payload, string $secret): array
     {
+        $url = trim($url);
+        $secret = forum_normalize_webhook_secret($secret);
         if (is_callable($this->webhookSender)) {
             $result = ($this->webhookSender)($url, $payload, $secret);
             if (!is_array($result)) {
-                return ['ok' => false, 'status' => 0, 'error' => 'Webhook-sender gaf geen geldig resultaat.', 'body' => ''];
+                return ['ok' => false, 'status' => 0, 'error' => 'Webhook-sender gaf geen geldig resultaat.', 'body' => '', 'attempts' => 1];
             }
             return [
                 'ok' => !empty($result['ok']),
                 'status' => (int) ($result['status'] ?? 0),
                 'error' => (string) ($result['error'] ?? ''),
                 'body' => (string) ($result['body'] ?? ''),
+                'attempts' => max(1, (int) ($result['attempts'] ?? 1)),
             ];
         }
 

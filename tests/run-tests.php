@@ -198,6 +198,8 @@ forum_test('bot can send a message as-is to another bot', function () use ($stor
         'extra' => 'behouden',
     ]);
     forum_assert($result['delivered'] === true, 'Berichtaflevering faalde.');
+    forum_assert(($result['webhook_http_status'] ?? 0) === 200, 'send moet webhook_http_status teruggeven.');
+    forum_assert(($result['webhook_attempts'] ?? 0) === 1, 'mock-webhook is één poging.');
     forum_assert($result['message']['label'] === 'Tim Falken:Asclepius -> Milan Scheenloop:Mercurius: Openstaande post', 'Loglabel klopt niet.');
     forum_assert(($webhooks[0]['payload']['extra'] ?? null) === 'behouden', 'Extra velden moeten as-is mee.');
     forum_assert(($webhooks[0]['payload']['from_bot'] ?? null) === 'Asclepius', 'Afzender ontbreekt in webhook.');
@@ -424,6 +426,8 @@ forum_test('help spec is machine-readable and includes inbox/ack', function () u
     forum_assert(($help['json']['endpoint']['url_shape'] ?? '') === 'api.php?action={action}', 'url_shape ontbreekt.');
     forum_assert(($help['json']['delivery']['webhooks'] ?? '') === 'best-effort', 'delivery.webhooks moet best-effort zijn.');
     forum_assert(($help['json']['delivery']['reliable_source'] ?? '') === 'inbox', 'delivery.reliable_source moet inbox zijn.');
+    forum_assert(str_contains((string) ($help['json']['delivery']['success_means'] ?? ''), 'HTTP 2xx'), 'delivery.success_means moet HTTP 2xx uitleggen.');
+    forum_assert(str_contains((string) ($help['json']['delivery']['retries'] ?? ''), '5xx'), 'delivery.retries ontbreekt.');
     forum_assert(str_contains((string) ($help['json']['delivery']['temporary_api_keys'] ?? ''), 'api_key'), 'help moet tijdelijke API-keys in payloads documenteren.');
     forum_assert(str_contains((string) ($help['json']['actions']['send']['result'] ?? ''), 'Temporary api_key'), 'send-spec moet recovery-keys noemen.');
     forum_assert(isset($help['json']['auth']['roles']['bot_api_key'], $help['json']['auth']['roles']['user_access_key'], $help['json']['auth']['roles']['webhook_secret']), 'auth.roles ontbreekt.');
@@ -465,6 +469,7 @@ forum_test('help spec is machine-readable and includes inbox/ack', function () u
     forum_assert(str_contains((string) ($register['result'] ?? ''), 'webhook_secret'), 'register-spec moet dual auth noemen.');
     forum_assert(str_contains((string) ($help['json']['actions']['send']['auth'] ?? ''), 'webhook_secret'), 'send-auth moet dual auth zijn.');
     forum_assert(str_contains((string) ($help['json']['actions']['send']['result'] ?? ''), 'best-effort'), 'send moet webhook als best-effort documenteren.');
+    forum_assert(isset($help['json']['actions']['send']['response']['webhook_http_status']), 'send-spec mist webhook_http_status.');
 
     $description = forum_bot_api_key_description();
     forum_assert(str_contains($description, 'inbox') && str_contains($description, 'ack'), 'API-key description mist poll-actions.');
@@ -812,6 +817,169 @@ forum_test('failed approval webhook keeps the request pending', function () use 
     forum_assert(empty($result['webhook']['ok']), 'Webhook had moeten falen.');
     forum_assert($failStore->findBotByUid('elpis-1') === null, 'Bot mag niet blijven staan na mislukte webhook.');
     forum_assert($failStore->countPendingRequests('cvrij@kvt.nl') === 1, 'Verzoek moet pending blijven.');
+});
+
+forum_test('webhook secret is normalized from Cursor header paste', function (): void {
+    forum_assert(forum_normalize_webhook_secret("  crsr_abc \n") === 'crsr_abc', 'trim ontbreekt.');
+    forum_assert(forum_normalize_webhook_secret('Bearer crsr_abc') === 'crsr_abc', 'Bearer-prefix moet eraf.');
+    forum_assert(forum_normalize_webhook_secret('Authorization: Bearer crsr_abc') === 'crsr_abc', 'Authorization-header moet secret overhouden.');
+    forum_assert(forum_normalize_webhook_secret("crsr_abc\r\nInject: 1") === '', 'CR/LF in secret is ongeldig.');
+    forum_assert(forum_webhook_is_retryable(['ok' => false, 'status' => 0]) === true, 'connect-fout moet retryable zijn.');
+    forum_assert(forum_webhook_is_retryable(['ok' => false, 'status' => 502]) === true, '502 moet retryable zijn.');
+    forum_assert(forum_webhook_is_retryable(['ok' => false, 'status' => 401]) === false, '401 mag niet retryen.');
+    forum_assert(forum_webhook_is_retryable(['ok' => true, 'status' => 200]) === false, '2xx mag niet retryen.');
+});
+
+forum_test('stored webhook secrets are trimmed and lookup accepts Bearer paste', function () use ($tempDir): void {
+    $path = $tempDir . '/secret-normalize.sqlite';
+    $secretStore = new ForumStore($path);
+    $secretStore->touchUser('tfalken@kvt.nl', 'Tim Falken', 'access-secret');
+    $secretStore->webhookSender = static function (): array {
+        return ['ok' => true, 'status' => 200, 'error' => '', 'body' => 'ok'];
+    };
+    $request = $secretStore->upsertAccessRequest(
+        'tfalken@kvt.nl',
+        'Tim Falken',
+        'Norm',
+        'norm-1',
+        'https://example.test/hook-n',
+        "Authorization: Bearer  crsr_norm  \n",
+        []
+    );
+    $row = $secretStore->pdo()->prepare('SELECT webhook_secret FROM access_requests WHERE id = :id');
+    $row->execute([':id' => $request['id']]);
+    forum_assert((string) $row->fetchColumn() === 'crsr_norm', 'Access-request secret is niet genormaliseerd.');
+    $secretStore->approveRequest((int) $request['id'], 'tfalken@kvt.nl');
+    forum_assert($secretStore->findBotByWebhookSecret('Bearer crsr_norm') !== null, 'Lookup moet Bearer-prefix accepteren.');
+    forum_assert($secretStore->findBotByCredential('crsr_norm') !== null, 'Credential lookup moet genormaliseerd secret vinden.');
+
+    $secretStore->pdo()->prepare('UPDATE bots SET webhook_secret = :secret WHERE uid = :uid')->execute([
+        ':secret' => "  crsr_norm \n",
+        ':uid' => 'norm-1',
+    ]);
+    $reopened = new ForumStore($path);
+    forum_assert($reopened->findBotByWebhookSecret('crsr_norm') !== null, 'Migrate moet bestaande secrets trimmen.');
+});
+
+forum_test('real HTTP webhook retries 502 once and keeps 401 body', function () use ($tempDir): void {
+    $stubDir = $tempDir . '/http-stub';
+    if (!@mkdir($stubDir, 0770, true) && !is_dir($stubDir)) {
+        throw new RuntimeException('Kon HTTP-stubdirectory niet aanmaken.');
+    }
+    $stateFile = $stubDir . '/state.json';
+    $stubFile = $stubDir . '/router.php';
+    $serverLog = $stubDir . '/server.log';
+    file_put_contents($stateFile, json_encode(['mode' => 'fail-once', 'hits' => 0, 'requests' => []], JSON_UNESCAPED_SLASHES));
+    file_put_contents($stubFile, <<<'PHP'
+<?php
+$stateFile = __DIR__ . '/state.json';
+$raw = (string) file_get_contents('php://input');
+$state = json_decode((string) @file_get_contents($stateFile), true);
+if (!is_array($state)) {
+    $state = ['mode' => 'ok', 'hits' => 0, 'requests' => []];
+}
+$state['hits'] = (int) ($state['hits'] ?? 0) + 1;
+$state['requests'][] = [
+    'method' => (string) ($_SERVER['REQUEST_METHOD'] ?? ''),
+    'authorization' => (string) ($_SERVER['HTTP_AUTHORIZATION'] ?? ''),
+    'expect' => (string) ($_SERVER['HTTP_EXPECT'] ?? ''),
+    'content_type' => (string) ($_SERVER['CONTENT_TYPE'] ?? ($_SERVER['HTTP_CONTENT_TYPE'] ?? '')),
+    'ua' => (string) ($_SERVER['HTTP_USER_AGENT'] ?? ''),
+    'body' => $raw,
+];
+$mode = (string) ($state['mode'] ?? 'ok');
+$hit = (int) $state['hits'];
+file_put_contents($stateFile, json_encode($state, JSON_UNESCAPED_SLASHES));
+if ($mode === 'fail-once' && $hit === 1) {
+    http_response_code(502);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo 'bad gateway';
+    exit;
+}
+if ($mode === 'unauthorized') {
+    http_response_code(401);
+    header('Content-Type: application/json');
+    echo '{"error":"invalid key"}';
+    exit;
+}
+http_response_code(200);
+header('Content-Type: application/json');
+echo '{"ok":true}';
+exit;
+PHP
+    );
+
+    $sock = @stream_socket_server('tcp://127.0.0.1:0');
+    if ($sock === false) {
+        throw new RuntimeException('Kon geen vrije poort openen.');
+    }
+    $name = stream_socket_get_name($sock, false);
+    fclose($sock);
+    if (!is_string($name) || !str_contains($name, ':')) {
+        throw new RuntimeException('Kon poort niet bepalen.');
+    }
+    $port = (int) substr($name, strrpos($name, ':') + 1);
+    $cmd = 'php -S 127.0.0.1:' . $port . ' ' . escapeshellarg($stubFile);
+    $process = proc_open(
+        $cmd,
+        [
+            0 => ['pipe', 'r'],
+            1 => ['file', $serverLog, 'w'],
+            2 => ['file', $serverLog, 'a'],
+        ],
+        $pipes,
+        $stubDir,
+        null
+    );
+    if (!is_resource($process)) {
+        throw new RuntimeException('Kon PHP-webserver niet starten.');
+    }
+    if (isset($pipes[0]) && is_resource($pipes[0])) {
+        fclose($pipes[0]);
+    }
+
+    try {
+        $ready = false;
+        $deadline = microtime(true) + 3;
+        while (microtime(true) < $deadline) {
+            $fp = @fsockopen('127.0.0.1', $port, $errno, $errstr, 0.15);
+            if (is_resource($fp)) {
+                fclose($fp);
+                $ready = true;
+                break;
+            }
+            usleep(25000);
+        }
+        forum_assert($ready, 'HTTP-stub luisterde niet.');
+
+        $url = 'http://127.0.0.1:' . $port . '/forum-webhook';
+        $retried = forum_post_webhook($url, ['title' => 'retry'], 'Authorization: Bearer crsr_retry');
+        forum_assert(!empty($retried['ok']) && (int) $retried['status'] === 200, '502 had na retry 200 moeten geven.');
+        forum_assert((int) $retried['attempts'] === 2, '502 moet precies één keer herhaald worden.');
+
+        $state = json_decode((string) file_get_contents($stateFile), true);
+        forum_assert((int) ($state['hits'] ?? 0) === 2, 'fail-once stub is niet twee keer geraakt.');
+        $auth = (string) ($state['requests'][0]['authorization'] ?? '');
+        forum_assert($auth === 'Bearer crsr_retry', 'Authorization-header klopt niet: ' . $auth);
+        forum_assert(($state['requests'][0]['expect'] ?? '') === '', 'Expect: 100-continue moet uit staan.');
+        forum_assert(($state['requests'][0]['method'] ?? '') === 'POST', 'Webhook moet POST zijn.');
+        $decoded = json_decode((string) ($state['requests'][0]['body'] ?? ''), true);
+        forum_assert(is_array($decoded) && ($decoded['title'] ?? '') === 'retry', 'JSON-body kwam niet aan.');
+
+        file_put_contents($stateFile, json_encode(['mode' => 'unauthorized', 'hits' => 0, 'requests' => []], JSON_UNESCAPED_SLASHES));
+        $denied = forum_post_webhook($url, ['title' => 'nope'], 'crsr_bad');
+        forum_assert(empty($denied['ok']) && (int) $denied['status'] === 401, '401 had moeten falen.');
+        forum_assert((int) $denied['attempts'] === 1, '401 mag niet retryen.');
+        forum_assert(str_contains((string) $denied['error'], 'HTTP 401'), 'delivery_error mist HTTP-status.');
+        forum_assert(str_contains((string) $denied['error'], 'invalid key'), 'delivery_error mist response-body.');
+    } finally {
+        proc_terminate($process);
+        $status = proc_get_status($process);
+        if (!empty($status['pid'])) {
+            @exec('kill ' . (int) $status['pid'] . ' 2>/dev/null');
+        }
+        proc_close($process);
+    }
 });
 
 foreach (glob($tempDir . '/*') ?: [] as $file) {
