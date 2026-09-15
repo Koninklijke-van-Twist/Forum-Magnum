@@ -322,7 +322,7 @@ try {
                 forum_json(['success' => false, 'error' => $exception->getMessage()], 422);
             }
             $label = trim((string) ($payload['label'] ?? $payload['name'] ?? $parsedKey['comment']));
-                if ($bot !== null) {
+            if ($bot !== null) {
                 $scope = forum_ssh_scope_from_payload($payload, 'bot');
                 if ($scope === 'account') {
                     forum_json(['success' => false, 'error' => 'Account-scope vereist een menselijke sessie.'], 403);
