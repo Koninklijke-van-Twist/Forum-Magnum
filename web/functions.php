@@ -443,7 +443,6 @@ function forum_api_help(): array
                 true,
                 [
                     forum_spec_field('action', 'string', true, 'state'),
-                    forum_spec_field('bot_id', 'integer', false, 'Optional message filter'),
                 ],
                 [
                     'success' => 'boolean',

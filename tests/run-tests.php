@@ -1238,7 +1238,7 @@ forum_test('human can message a bot and a bot can message a human', function () 
     $js = (string) file_get_contents(dirname(__DIR__) . '/web/app.js');
     $html = (string) file_get_contents(dirname(__DIR__) . '/web/index.php');
     forum_assert(str_contains($html, 'Incoming Messages'), 'UI mist Incoming Messages-knop.');
-    forum_assert(str_contains($js, 'human_send') && str_contains($js, 'data-compose-bot'), 'UI mist compose naar bots.');
+    forum_assert(str_contains($js, 'human_send') && str_contains($js, 'data-compose-bot') && str_contains($js, 'bot-compose'), 'UI mist compose naar bots.');
     forum_assert(str_contains($js, 'messageReply') && str_contains($js, 'Andere gebruikers'), 'UI mist reply of andermans bots.');
 });
 

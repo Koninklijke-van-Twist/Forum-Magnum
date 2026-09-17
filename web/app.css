@@ -359,6 +359,11 @@ button:disabled {
     margin-top: 8px;
 }
 
+.bot-compose {
+    margin-top: 10px;
+    width: 100%;
+}
+
 .incoming-row.is-unread {
     background: var(--danger-soft);
     border-color: #e3b4b4;

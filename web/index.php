@@ -22,6 +22,7 @@ $csrf = forum_csrf_token();
 $userName = $sessionUser['name'];
 $accessKey = $sessionUser['api_key'];
 $pendingCount = $store->countPendingRequests($sessionUser['email']);
+$assetVersion = max((int) @filemtime(__DIR__ . '/app.js'), (int) @filemtime(__DIR__ . '/app.css'));
 
 ?>
 <!doctype html>
@@ -31,7 +32,7 @@ $pendingCount = $store->countPendingRequests($sessionUser['email']);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Forum Magnum</title>
     <link rel="icon" href="thumbnail.png">
-    <link rel="stylesheet" href="app.css">
+    <link rel="stylesheet" href="app.css?v=<?= (int) $assetVersion ?>">
 </head>
 <body>
     <div class="app">
@@ -209,6 +210,6 @@ $pendingCount = $store->countPendingRequests($sessionUser['email']);
             csrf: <?= json_encode($csrf, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>
         };
     </script>
-    <script src="app.js"></script>
+    <script src="app.js?v=<?= (int) $assetVersion ?>"></script>
 </body>
 </html>

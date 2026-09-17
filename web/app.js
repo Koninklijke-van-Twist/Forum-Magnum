@@ -168,7 +168,7 @@
                 identity +
                 token +
                 (tags ? '<div class="tags">' + tags + '</div>' : '') +
-                '<div class="meta compose-hint">Klik om een bericht te sturen</div>' +
+                '<button type="button" class="btn-primary bot-compose" data-compose-bot="' + bot.id + '" data-compose-label="' + escapeHtml(composeLabel(bot)) + '">Bericht sturen</button>' +
             '</div>'
         );
     }
@@ -365,7 +365,9 @@
             }
         }
         state.keys = data.keys || [];
-        renderBots();
+        if (!(els.composeModal && els.composeModal.classList.contains('is-open'))) {
+            renderBots();
+        }
         renderMessages();
         updateRequestButton();
         updateIncomingButton();
@@ -558,15 +560,6 @@
             return;
         }
 
-        const composeCard = target.closest('[data-compose-bot]');
-        if (composeCard && els.botList && els.botList.contains(composeCard) && !target.closest('summary')) {
-            openCompose(
-                Number(composeCard.getAttribute('data-compose-bot') || 0),
-                composeCard.getAttribute('data-compose-label') || 'bot'
-            );
-            return;
-        }
-
         const incomingRow = target.closest('[data-incoming-id]');
         if (incomingRow) {
             openMessage(Number(incomingRow.getAttribute('data-incoming-id') || 0));
@@ -646,6 +639,28 @@
             });
         }
     });
+
+    if (els.botList) {
+        els.botList.addEventListener('pointerdown', function (event) {
+            const target = event.target;
+            if (!(target instanceof Element)) {
+                return;
+            }
+            if (target.closest('[data-bot-settings], .token, summary, input, textarea')) {
+                return;
+            }
+            const card = target.closest('[data-compose-bot]');
+            if (!card) {
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            openCompose(
+                Number(card.getAttribute('data-compose-bot') || 0),
+                card.getAttribute('data-compose-label') || 'bot'
+            );
+        });
+    }
 
     if (els.accessKeyBtn) {
         els.accessKeyBtn.addEventListener('click', function () {

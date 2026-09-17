@@ -175,7 +175,6 @@ try {
 
         case 'state':
             $user = forum_require_human($sessionUser);
-            $filterBotId = (int) ($payload['bot_id'] ?? 0);
             forum_json([
                 'success' => true,
                 'user' => [
@@ -187,7 +186,7 @@ try {
                 'directory' => $store->listDirectory($user['email']),
                 'pending_count' => $store->countPendingRequests($user['email']),
                 'incoming_count' => $store->countUnackedHumanInbox($user),
-                'messages' => $store->listMessages(200, $filterBotId > 0 ? $filterBotId : null),
+                'messages' => $store->listMessages(200),
                 'keys' => $store->listKeys(),
                 'ssh_keys' => $store->listSshKeysForOwner($user['email']),
             ]);
