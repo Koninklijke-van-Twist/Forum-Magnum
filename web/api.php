@@ -184,7 +184,9 @@ try {
                     'access_key' => $user['api_key'],
                 ],
                 'bots' => $store->listBotsForOwner($user['email']),
+                'directory' => $store->listDirectory($user['email']),
                 'pending_count' => $store->countPendingRequests($user['email']),
+                'incoming_count' => $store->countUnackedHumanInbox($user),
                 'messages' => $store->listMessages(200, $filterBotId > 0 ? $filterBotId : null),
                 'keys' => $store->listKeys(),
                 'ssh_keys' => $store->listSshKeysForOwner($user['email']),
@@ -254,7 +256,41 @@ try {
             if ($message === null) {
                 forum_json(['success' => false, 'error' => 'Bericht niet gevonden.'], 404);
             }
+            $forHuman = $store->messageIsForHuman($message, $user);
+            if ($forHuman) {
+                $store->ackHumanMessages($user, [$messageId]);
+                $message['acked'] = true;
+            }
+            $message['can_reply'] = $forHuman && trim((string) ($message['from_bot'] ?? '')) !== '';
             forum_json(['success' => true, 'message' => $message]);
+
+        case 'human_send':
+            forum_require_method(['POST']);
+            $user = forum_require_human($sessionUser);
+            forum_require_csrf($payload);
+            $result = $store->sendHumanMessage($user, $payload);
+            forum_json([
+                'success' => $result['delivered'],
+                'delivered' => $result['delivered'],
+                'webhook_http_status' => $result['webhook_http_status'],
+                'webhook_attempts' => $result['webhook_attempts'],
+                'error' => $result['error'] !== '' ? $result['error'] : null,
+                'message' => [
+                    'id' => $result['message']['id'],
+                    'label' => $result['message']['label'],
+                ],
+            ], $result['delivered'] ? 200 : 502);
+
+        case 'human_inbox':
+            $user = forum_require_human($sessionUser);
+            $unackedOnly = forum_request_flag($payload['unacked_only'] ?? null, false);
+            $messages = $store->listHumanInbox($user, $unackedOnly);
+            forum_json([
+                'success' => true,
+                'incoming_count' => $store->countUnackedHumanInbox($user),
+                'messages' => $messages,
+                'count' => count($messages),
+            ]);
 
         case 'keys_list':
             $user = forum_require_human($sessionUser);

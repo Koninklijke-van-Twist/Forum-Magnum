@@ -333,6 +333,31 @@ class ForumStore
     /**
      * @return array{email: string, name: string, access_key_hash: string, created_at: int, updated_at: int}|null
      */
+    public function findUserByNameOrEmail(string $value): ?array
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+
+        $statement = $this->pdo->prepare(
+            'SELECT * FROM users
+             WHERE email = :email OR name = :name COLLATE NOCASE
+             ORDER BY CASE WHEN email = :email_first THEN 0 ELSE 1 END ASC
+             LIMIT 1'
+        );
+        $statement->execute([
+            ':email' => strtolower($value),
+            ':email_first' => strtolower($value),
+            ':name' => $value,
+        ]);
+        $row = $statement->fetch();
+        return is_array($row) ? $this->normalizeUser($row) : null;
+    }
+
+    /**
+     * @return array{email: string, name: string, access_key_hash: string, created_at: int, updated_at: int}|null
+     */
     public function findUserByAccessKey(string $accessKey): ?array
     {
         $accessKey = trim($accessKey);
@@ -887,6 +912,98 @@ class ForumStore
     }
 
     /**
+     * Public bot directory grouped by owner, without secrets or webhook URLs.
+     *
+     * @return list<array{name: string, email: string, bots: list<array<string, mixed>>}>
+     */
+    public function listDirectory(?string $excludeOwnerEmail = null): array
+    {
+        $excludeOwnerEmail = strtolower(trim((string) $excludeOwnerEmail));
+        $statement = $this->pdo->query(
+            'SELECT id, owner_name, owner_email, name, uid, grok_agent_id, specialties_json
+             FROM bots
+             ORDER BY owner_name COLLATE NOCASE ASC, name COLLATE NOCASE ASC, id ASC'
+        );
+        $grouped = [];
+        foreach ($statement->fetchAll() as $row) {
+            $ownerEmail = strtolower(trim((string) ($row['owner_email'] ?? '')));
+            if ($excludeOwnerEmail !== '' && $ownerEmail === $excludeOwnerEmail) {
+                continue;
+            }
+            $groupKey = $ownerEmail !== '' ? $ownerEmail : strtolower((string) ($row['owner_name'] ?? ''));
+            if (!isset($grouped[$groupKey])) {
+                $grouped[$groupKey] = [
+                    'name' => (string) ($row['owner_name'] ?? ''),
+                    'email' => $ownerEmail,
+                    'bots' => [],
+                ];
+            }
+            $grouped[$groupKey]['bots'][] = [
+                'id' => (int) ($row['id'] ?? 0),
+                'name' => (string) ($row['name'] ?? ''),
+                'uid' => (string) ($row['uid'] ?? ''),
+                'grok_agent_id' => (string) ($row['grok_agent_id'] ?? ''),
+                'specialties' => forum_normalize_specialties($row['specialties_json'] ?? []),
+                'owner_name' => (string) ($row['owner_name'] ?? ''),
+                'owner_email' => (string) ($row['owner_email'] ?? ''),
+            ];
+        }
+
+        return array_values($grouped);
+    }
+
+    /**
+     * @param array{email: string, name: string} $user
+     * @param array<string, mixed> $payload
+     * @return array{message: array<string, mixed>, delivered: bool, error: string, webhook_http_status: int, webhook_attempts: int}
+     */
+    public function sendHumanMessage(array $user, array $payload): array
+    {
+        $replyTo = (int) ($payload['in_reply_to'] ?? $payload['reply_to'] ?? 0);
+        if ($replyTo > 0) {
+            $original = $this->getMessage($replyTo);
+            if ($original === null || !$this->messageIsForHuman($original, $user)) {
+                throw new InvalidArgumentException('Dit bericht kun je niet beantwoorden.');
+            }
+            if (trim((string) $original['from_bot']) === '') {
+                throw new InvalidArgumentException('Dit bericht komt niet van een bot.');
+            }
+            $payload['to_uid'] = (string) ($original['from_uid'] ?? '');
+            $payload['to_user'] = (string) ($original['from_user'] ?? '');
+            $payload['to_bot'] = (string) ($original['from_bot'] ?? '');
+            if (trim((string) ($payload['title'] ?? '')) === '') {
+                $origTitle = trim((string) ($original['title'] ?? ''));
+                $payload['title'] = preg_match('/^re:\s*/i', $origTitle) === 1 ? $origTitle : 'Re: ' . $origTitle;
+            }
+        }
+
+        $botId = (int) ($payload['bot_id'] ?? 0);
+        if ($botId > 0 && $replyTo <= 0) {
+            $bot = $this->getBot($botId);
+            if ($bot === null) {
+                throw new InvalidArgumentException('Doel-bot niet gevonden.');
+            }
+            $payload['to_uid'] = (string) ($bot['uid'] ?? '');
+            $payload['to_user'] = (string) ($bot['owner_name'] ?? '');
+            $payload['to_bot'] = (string) ($bot['name'] ?? '');
+        }
+
+        $result = $this->sendMessage([
+            'owner_name' => (string) ($user['name'] ?? ''),
+            'owner_email' => (string) ($user['email'] ?? ''),
+            'name' => '',
+            'uid' => '',
+            'bot_api_key' => '',
+        ], $payload);
+
+        if ($replyTo > 0) {
+            $this->ackHumanMessages($user, [$replyTo]);
+        }
+
+        return $result;
+    }
+
+    /**
      * @param array<string, mixed> $payload
      * @return array{message: array<string, mixed>, delivered: bool, error: string, webhook_http_status: int, webhook_attempts: int}
      */
@@ -897,9 +1014,9 @@ class ForumStore
             throw new InvalidArgumentException('Titel is verplicht.');
         }
 
-        $target = $this->resolveTarget($payload);
-        if ($target === null) {
-            throw new InvalidArgumentException('Doel-bot niet gevonden. Gebruik to_uid of to_user + to_bot.');
+        $destination = $this->resolveDestination($payload);
+        if ($destination === null) {
+            throw new InvalidArgumentException('Doel niet gevonden. Gebruik to_uid, to_user + to_bot, of alleen to_user voor een persoon.');
         }
 
         $body = $payload['body'] ?? $payload['message'] ?? '';
@@ -909,19 +1026,29 @@ class ForumStore
             $bodyText = (string) $body;
         }
 
+        $fromBotName = (string) ($fromBot['name'] ?? '');
         $outbound = forum_strip_sensitive_fields($payload);
-        $outbound['from_user'] = (string) $fromBot['owner_name'];
-        $outbound['from_bot'] = (string) $fromBot['name'];
-        $outbound['from_uid'] = (string) $fromBot['uid'];
-        $outbound['to_user'] = (string) $target['owner_name'];
-        $outbound['to_bot'] = (string) $target['name'];
-        $outbound['to_uid'] = (string) $target['uid'];
+        $outbound['from_user'] = (string) ($fromBot['owner_name'] ?? '');
+        $outbound['from_bot'] = $fromBotName;
+        $outbound['from_uid'] = (string) ($fromBot['uid'] ?? '');
+        $outbound['from_kind'] = $fromBotName === '' ? 'user' : 'bot';
         $outbound['title'] = $title;
         $outbound['body'] = $body;
 
-        $webhookPayload = $outbound;
-        if (trim((string) ($webhookPayload['bot_api_key'] ?? '')) === '') {
-            $webhookPayload['bot_api_key'] = (string) ($target['bot_api_key'] ?? '');
+        $targetBot = null;
+        if ($destination['kind'] === 'user') {
+            $targetUser = $destination['user'];
+            $outbound['to_user'] = (string) ($targetUser['name'] ?? '');
+            $outbound['to_bot'] = '';
+            $outbound['to_uid'] = '';
+            $outbound['to_kind'] = 'user';
+            $outbound['to_email'] = (string) ($targetUser['email'] ?? '');
+        } else {
+            $targetBot = $destination['bot'];
+            $outbound['to_user'] = (string) ($targetBot['owner_name'] ?? '');
+            $outbound['to_bot'] = (string) ($targetBot['name'] ?? '');
+            $outbound['to_uid'] = (string) ($targetBot['uid'] ?? '');
+            $outbound['to_kind'] = 'bot';
         }
 
         $now = forum_now();
@@ -931,27 +1058,48 @@ class ForumStore
                 title, body, payload_json, delivered, delivery_error, created_at
              ) VALUES (
                 :from_user, :from_bot, :from_uid, :to_user, :to_bot, :to_uid,
-                :title, :body, :payload_json, 0, "", :created_at
+                :title, :body, :payload_json, :delivered, "", :created_at
              )'
         );
         $insert->execute([
-            ':from_user' => $fromBot['owner_name'],
-            ':from_bot' => $fromBot['name'],
-            ':from_uid' => $fromBot['uid'],
-            ':to_user' => $target['owner_name'],
-            ':to_bot' => $target['name'],
-            ':to_uid' => $target['uid'],
+            ':from_user' => (string) $outbound['from_user'],
+            ':from_bot' => (string) $outbound['from_bot'],
+            ':from_uid' => (string) $outbound['from_uid'],
+            ':to_user' => (string) $outbound['to_user'],
+            ':to_bot' => (string) $outbound['to_bot'],
+            ':to_uid' => (string) $outbound['to_uid'],
             ':title' => $title,
             ':body' => $bodyText,
             ':payload_json' => json_encode($outbound, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            ':delivered' => $targetBot === null ? 1 : 0,
             ':created_at' => $now,
         ]);
         $messageId = (int) $this->pdo->lastInsertId();
 
+        if ($targetBot === null) {
+            $message = $this->getMessage($messageId);
+            if ($message === null) {
+                throw new RuntimeException('Bericht kon niet worden opgeslagen.');
+            }
+
+            return [
+                'message' => $message,
+                'delivered' => true,
+                'error' => '',
+                'webhook_http_status' => 0,
+                'webhook_attempts' => 0,
+            ];
+        }
+
+        $webhookPayload = $outbound;
+        if (trim((string) ($webhookPayload['bot_api_key'] ?? '')) === '') {
+            $webhookPayload['bot_api_key'] = (string) ($targetBot['bot_api_key'] ?? '');
+        }
+
         $webhook = $this->deliver(
-            (string) $target['webhook_url'],
+            (string) $targetBot['webhook_url'],
             $webhookPayload,
-            (string) $target['webhook_secret']
+            (string) $targetBot['webhook_secret']
         );
 
         $deliveryError = '';
@@ -970,7 +1118,6 @@ class ForumStore
             ':error' => $deliveryError,
             ':id' => $messageId,
         ]);
-        $error = $deliveryError;
 
         $message = $this->getMessage($messageId);
         if ($message === null) {
@@ -979,8 +1126,8 @@ class ForumStore
 
         return [
             'message' => $message,
-            'delivered' => $webhook['ok'],
-            'error' => $error,
+            'delivered' => !empty($webhook['ok']),
+            'error' => $deliveryError,
             'webhook_http_status' => (int) ($webhook['status'] ?? 0),
             'webhook_attempts' => max(1, (int) ($webhook['attempts'] ?? 1)),
         ];
@@ -1489,39 +1636,196 @@ class ForumStore
     }
 
     /**
+     * @param array{email?: string, name?: string} $user
+     */
+    public function messageIsForHuman(array $message, array $user): bool
+    {
+        if (trim((string) ($message['to_bot'] ?? '')) !== '') {
+            return false;
+        }
+
+        $toUser = strtolower(trim((string) ($message['to_user'] ?? '')));
+        $name = strtolower(trim((string) ($user['name'] ?? '')));
+        $email = strtolower(trim((string) ($user['email'] ?? '')));
+        if ($toUser === '') {
+            return false;
+        }
+
+        return ($name !== '' && $toUser === $name) || ($email !== '' && $toUser === $email);
+    }
+
+    /**
+     * @param array{email: string, name: string} $user
+     * @return list<array<string, mixed>>
+     */
+    public function listHumanInbox(array $user, bool $unackedOnly = false, int $limit = 200): array
+    {
+        $limit = max(1, min(500, $limit));
+        $sql = 'SELECT * FROM messages WHERE ' . $this->messageAddressedToHumanClause();
+        if ($unackedOnly) {
+            $sql .= ' AND acked = 0';
+        }
+        $sql .= ' ORDER BY created_at DESC, id DESC LIMIT :limit';
+        $statement = $this->pdo->prepare($sql);
+        $this->bindHumanAddress($statement, $user);
+        $statement->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $statement->execute();
+
+        return array_map([$this, 'normalizeMessage'], $statement->fetchAll());
+    }
+
+    /**
+     * @param array{email: string, name: string} $user
+     */
+    public function countUnackedHumanInbox(array $user): int
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM messages WHERE ' . $this->messageAddressedToHumanClause() . ' AND acked = 0'
+        );
+        $this->bindHumanAddress($statement, $user);
+        $statement->execute();
+        return (int) $statement->fetchColumn();
+    }
+
+    /**
+     * @param array{email: string, name: string} $user
+     * @param list<int|string> $ids
+     * @return array{acked: list<int>, ignored: list<int>}
+     */
+    public function ackHumanMessages(array $user, array $ids): array
+    {
+        $ids = forum_normalize_ids($ids);
+        if ($ids === []) {
+            return ['acked' => [], 'ignored' => []];
+        }
+
+        $placeholders = [];
+        foreach ($ids as $index => $id) {
+            $placeholders[] = ':id' . $index;
+        }
+
+        $select = $this->pdo->prepare(
+            'SELECT id FROM messages
+             WHERE id IN (' . implode(', ', $placeholders) . ')
+               AND ' . $this->messageAddressedToHumanClause()
+        );
+        foreach ($ids as $index => $id) {
+            $select->bindValue(':id' . $index, $id, PDO::PARAM_INT);
+        }
+        $this->bindHumanAddress($select, $user);
+        $select->execute();
+
+        $owned = [];
+        foreach ($select->fetchAll() as $row) {
+            $owned[] = (int) $row['id'];
+        }
+
+        if ($owned !== []) {
+            $ownedPlaceholders = [];
+            foreach ($owned as $index => $id) {
+                $ownedPlaceholders[] = ':oid' . $index;
+            }
+            $update = $this->pdo->prepare(
+                'UPDATE messages SET acked = 1
+                 WHERE id IN (' . implode(', ', $ownedPlaceholders) . ')'
+            );
+            foreach ($owned as $index => $id) {
+                $update->bindValue(':oid' . $index, $id, PDO::PARAM_INT);
+            }
+            $update->execute();
+        }
+
+        $ownedLookup = array_fill_keys($owned, true);
+        $ignored = [];
+        foreach ($ids as $id) {
+            if (!isset($ownedLookup[$id])) {
+                $ignored[] = $id;
+            }
+        }
+
+        return [
+            'acked' => $owned,
+            'ignored' => $ignored,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array{kind: 'bot', bot: array<string, mixed>}|array{kind: 'user', user: array<string, mixed>}|null
+     */
+    private function resolveDestination(array $payload): ?array
+    {
+        $uid = trim((string) ($payload['to_uid'] ?? ''));
+        if ($uid === '') {
+            $uid = trim((string) ($payload['uid'] ?? ''));
+        }
+        if ($uid !== '') {
+            $bot = $this->findBotByUid($uid);
+            if ($bot !== null) {
+                return ['kind' => 'bot', 'bot' => $bot];
+            }
+        }
+
+        $toUser = trim((string) ($payload['to_user'] ?? $payload['to_username'] ?? $payload['to_email'] ?? ''));
+        $toBot = trim((string) ($payload['to_bot'] ?? $payload['to_botname'] ?? ''));
+        if ($toUser === '' || $toBot === '') {
+            $parsed = forum_parse_target((string) ($payload['to'] ?? $payload['target'] ?? ''));
+            if ($parsed !== null) {
+                if ($toUser === '') {
+                    $toUser = $parsed['user'];
+                }
+                if ($toBot === '') {
+                    $toBot = $parsed['bot'];
+                }
+            }
+        }
+
+        if ($toUser === '') {
+            return null;
+        }
+
+        if ($toBot !== '') {
+            $bot = $this->findBotByOwnerAndName($toUser, $toBot);
+            return $bot === null ? null : ['kind' => 'bot', 'bot' => $bot];
+        }
+
+        $user = $this->findUserByNameOrEmail($toUser);
+        return $user === null ? null : ['kind' => 'user', 'user' => $user];
+    }
+
+    /**
      * @param array<string, mixed> $payload
      * @return array<string, mixed>|null
      */
     private function resolveTarget(array $payload): ?array
     {
-        $uid = trim((string) ($payload['to_uid'] ?? $payload['uid'] ?? ''));
-        if ($uid !== '') {
-            return $this->findBotByUid($uid);
-        }
-
-        $toUser = trim((string) ($payload['to_user'] ?? $payload['to_username'] ?? ''));
-        $toBot = trim((string) ($payload['to_bot'] ?? $payload['to_botname'] ?? ''));
-        if ($toUser === '' || $toBot === '') {
-            $parsed = forum_parse_target((string) ($payload['to'] ?? $payload['target'] ?? ''));
-            if ($parsed !== null) {
-                $toUser = $parsed['user'];
-                $toBot = $parsed['bot'];
-            }
-        }
-
-        if ($toUser === '' || $toBot === '') {
-            return null;
-        }
-
-        return $this->findBotByOwnerAndName($toUser, $toBot);
+        $destination = $this->resolveDestination($payload);
+        return ($destination !== null && $destination['kind'] === 'bot') ? $destination['bot'] : null;
     }
 
     private function messageAddressedToBotClause(): string
     {
         return '(
-            (to_user = :to_user COLLATE NOCASE AND to_bot = :to_bot COLLATE NOCASE)
-            OR (:to_uid_check != "" AND to_uid = :to_uid)
+            to_bot != ""
+            AND (
+                (to_user = :to_user COLLATE NOCASE AND to_bot = :to_bot COLLATE NOCASE)
+                OR (:to_uid_check != "" AND to_uid = :to_uid)
+            )
         )';
+    }
+
+    private function messageAddressedToHumanClause(): string
+    {
+        return 'to_bot = "" AND (to_user = :human_name COLLATE NOCASE OR to_user = :human_email COLLATE NOCASE)';
+    }
+
+    /**
+     * @param array{email?: string, name?: string} $user
+     */
+    private function bindHumanAddress(PDOStatement $statement, array $user): void
+    {
+        $statement->bindValue(':human_name', (string) ($user['name'] ?? ''));
+        $statement->bindValue(':human_email', strtolower(trim((string) ($user['email'] ?? ''))));
     }
 
     /**
@@ -1736,9 +2040,11 @@ class ForumStore
             'from_user' => $fromUser,
             'from_bot' => $fromBot,
             'from_uid' => (string) ($row['from_uid'] ?? ''),
+            'from_kind' => $fromBot === '' ? 'user' : 'bot',
             'to_user' => $toUser,
             'to_bot' => $toBot,
             'to_uid' => (string) ($row['to_uid'] ?? ''),
+            'to_kind' => $toBot === '' ? 'user' : 'bot',
             'title' => $title,
             'body' => (string) ($row['body'] ?? ''),
             'label' => forum_message_label($fromUser, $fromBot, $toUser, $toBot, $title),

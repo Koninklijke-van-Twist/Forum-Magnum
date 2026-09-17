@@ -42,6 +42,10 @@ $pendingCount = $store->countPendingRequests($sessionUser['email']);
             </div>
             <div class="top-actions">
                 <button type="button" id="accessKeyBtn">Access Key</button>
+                <button type="button" id="incomingBtn" class="btn-requests">
+                    Incoming Messages
+                    <span class="count" id="incomingCount">0</span>
+                </button>
                 <button type="button" id="requestBtn" class="btn-requests<?= $pendingCount > 0 ? ' has-pending' : '' ?>">
                     Access Requests
                     <span class="count" id="requestCount"><?= (int) $pendingCount ?></span>
@@ -152,6 +156,35 @@ $pendingCount = $store->countPendingRequests($sessionUser['email']);
         </div>
     </div>
 
+    <div class="modal-backdrop" id="incomingModal">
+        <div class="modal" role="dialog" aria-labelledby="incomingTitle">
+            <header>
+                <h3 id="incomingTitle">Incoming Messages</h3>
+                <button type="button" data-close>Sluiten</button>
+            </header>
+            <div class="body" id="incomingBody"></div>
+        </div>
+    </div>
+
+    <div class="modal-backdrop" id="composeModal">
+        <div class="modal" role="dialog" aria-labelledby="composeTitle">
+            <header>
+                <h3 id="composeTitle">Bericht sturen</h3>
+                <button type="button" data-close>Sluiten</button>
+            </header>
+            <div class="body">
+                <input type="hidden" id="composeBotId">
+                <p class="compose-target" id="composeTarget"></p>
+                <label class="field">Titel<input type="text" id="composeTitleInput" placeholder="Onderwerp"></label>
+                <label class="field">Bericht<textarea id="composeBody" placeholder="Typ je bericht…"></textarea></label>
+            </div>
+            <footer>
+                <button type="button" class="btn-primary" id="composeSend">Versturen</button>
+                <button type="button" data-close>Annuleren</button>
+            </footer>
+        </div>
+    </div>
+
     <div class="modal-backdrop" id="messageModal">
         <div class="modal" role="dialog" aria-labelledby="messageTitle">
             <header>
@@ -161,6 +194,12 @@ $pendingCount = $store->countPendingRequests($sessionUser['email']);
             <div class="body">
                 <div class="message-webhook" id="messageWebhook"></div>
                 <div class="message-body" id="messageBody"></div>
+                <div class="message-reply" id="messageReply" hidden>
+                    <label class="field">Antwoord<textarea id="messageReplyBody" placeholder="Typ een reactie om terug te sturen…"></textarea></label>
+                    <div class="inline-actions">
+                        <button type="button" class="btn-primary" id="messageReplySend">Terugsturen</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

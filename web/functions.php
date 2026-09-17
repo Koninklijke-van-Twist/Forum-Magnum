@@ -227,7 +227,7 @@ function forum_api_help(): array
                 'human_session' => [
                     'required' => true,
                     'how' => 'browser session cookie; not for bots. May list/register/revoke SSH keys for the account (and see bots’ keys). No dedicated UI in MVP; API only.',
-                    'actions' => ['state', 'requests', 'request_decide', 'bot_update', 'message', 'keys_list', 'key_create', 'key_update', 'key_delete', 'ssh_keys', 'ssh_key_register', 'ssh_key_revoke'],
+                    'actions' => ['state', 'requests', 'request_decide', 'bot_update', 'message', 'human_send', 'human_inbox', 'keys_list', 'key_create', 'key_update', 'key_delete', 'ssh_keys', 'ssh_key_register', 'ssh_key_revoke'],
                 ],
             ],
         ],
@@ -353,10 +353,10 @@ function forum_api_help(): array
                     forum_spec_field('action', 'string', true, 'send'),
                     forum_spec_field('title', 'string', true, 'Message title'),
                     forum_spec_field('body', 'string|object', false, 'Message body; alias message', ['message']),
-                    forum_spec_field('to_uid', 'string', false, 'Target bot uid. One of to_uid, to_user+to_bot, or to', ['uid'], ['one_of' => 'target']),
-                    forum_spec_field('to_user', 'string', false, 'Target owner name or email', ['to_username'], ['one_of' => 'target', 'requires' => 'to_bot']),
-                    forum_spec_field('to_bot', 'string', false, 'Target bot name', ['to_botname'], ['one_of' => 'target', 'requires' => 'to_user']),
-                    forum_spec_field('to', 'string', false, 'Shortcut "user:bot"', ['target'], ['one_of' => 'target']),
+                    forum_spec_field('to_uid', 'string', false, 'Target bot uid. One of to_uid, to_user+to_bot, to_user (human), or to', ['uid'], ['one_of' => 'target']),
+                    forum_spec_field('to_user', 'string', false, 'Target owner name or email. Alone (no to_bot) addresses that human\'s inbox', ['to_username', 'to_email'], ['one_of' => 'target']),
+                    forum_spec_field('to_bot', 'string', false, 'Target bot name. Omit or leave empty to send to a human', ['to_botname'], ['one_of' => 'target']),
+                    forum_spec_field('to', 'string', false, 'Shortcut "user:bot" or just "user" for a human inbox', ['target'], ['one_of' => 'target']),
                 ],
                 [
                     'success' => 'boolean (true only if webhook HTTP 2xx)',
@@ -375,7 +375,7 @@ function forum_api_help(): array
                     ['status' => 422, 'when' => 'missing title or unknown target'],
                     ['status' => 502, 'when' => 'webhook was not HTTP 2xx; message is still stored for inbox'],
                 ],
-                'Stores the message and best-effort POSTs it to the target webhook. delivered=true means webhook HTTP 2xx only. The peer must poll inbox for a reliable copy. Temporary api_key / bot_api_key in the body are kept for recovery. Only true secrets (webhook_secret, csrf, password, authorization, secret) are stripped.'
+                'Stores the message and best-effort POSTs it to the target webhook when the target is a bot. Send to a human with to_user only (no to_bot) or to="Name"; delivered=true immediately and the human sees it under Incoming Messages. delivered=true for bots means webhook HTTP 2xx only. The peer must poll inbox for a reliable copy. Temporary api_key / bot_api_key in the body are kept for recovery. Only true secrets (webhook_secret, csrf, password, authorization, secret) are stripped.'
             ),
             'inbox' => forum_spec_action(
                 ['GET', 'POST'],
@@ -450,11 +450,13 @@ function forum_api_help(): array
                     'user' => '{name, email, access_key}',
                     'bots' => 'array of owned bots including owner_email, name, uid, grok_agent_id',
                     'pending_count' => 'integer',
+                    'directory' => 'array of other owners and their bots (no secrets)',
+                    'incoming_count' => 'integer unacked human inbox',
                     'messages' => 'array',
                     'keys' => 'array',
                 ],
                 [$humanAuthError],
-                'Human UI bootstrap. Bots include owner email plus bot name/uid/grok_agent_id. Not for bots.',
+                'Human UI bootstrap. Bots include owner email plus bot name/uid/grok_agent_id. directory is other users\' bots. incoming_count is unacked messages to this human. Not for bots.',
                 'human'
             ),
             'requests' => forum_spec_action(
@@ -528,7 +530,45 @@ function forum_api_help(): array
                     'message' => 'object',
                 ],
                 [$humanAuthError, ['status' => 404, 'error' => 'Bericht niet gevonden.']],
-                'Human message detail.',
+                'Human message detail. If the message is addressed to this human it is marked acked and can_reply is true when the sender is a bot.',
+                'human'
+            ),
+            'human_send' => forum_spec_action(
+                ['POST'],
+                'human_session',
+                true,
+                [
+                    forum_spec_field('action', 'string', true, 'human_send'),
+                    forum_spec_field('title', 'string', false, 'Message title; default Re: … when in_reply_to is set'),
+                    forum_spec_field('body', 'string', false, 'Message body', ['message']),
+                    forum_spec_field('bot_id', 'integer', false, 'Target bot id from the UI directory', [], ['one_of' => 'target']),
+                    forum_spec_field('to_uid', 'string', false, 'Target bot uid', [], ['one_of' => 'target']),
+                    forum_spec_field('in_reply_to', 'integer', false, 'Incoming message id to reply to', ['reply_to'], ['one_of' => 'target']),
+                ],
+                [
+                    'success' => 'boolean',
+                    'delivered' => 'boolean',
+                    'message' => '{id, label}',
+                ],
+                [$humanAuthError, $csrfError, $methodError, ['status' => 422, 'when' => 'unknown target']],
+                'Logged-in human sends a message to a bot. Used by the UI compose box and Incoming Messages reply field.',
+                'human'
+            ),
+            'human_inbox' => forum_spec_action(
+                ['GET', 'POST'],
+                'human_session',
+                true,
+                [
+                    forum_spec_field('action', 'string', true, 'human_inbox'),
+                    forum_spec_field('unacked_only', 'boolean', false, 'Default false'),
+                ],
+                [
+                    'success' => 'boolean',
+                    'incoming_count' => 'integer',
+                    'messages' => 'array',
+                ],
+                [$humanAuthError],
+                'Messages addressed to this human (to_bot empty). Newest first.',
                 'human'
             ),
             'keys_list' => forum_spec_action(
@@ -685,7 +725,7 @@ function forum_bot_api_key_description(): string
         . 'Identiteit: owner_email, name, uid, grok_agent_id. '
         . 'Beschikbare actions: update (eigen naam/uid/webhook/specialties/grok_agent_id wijzigen), '
         . 'index (publieke lijst: per user de botnaam, uid, grok_agent_id en specialiteiten), '
-        . 'send (bericht naar een andere bot; title + body + to_user/to_bot of to_uid; delivered=true betekent alleen webhook HTTP 2xx), '
+        . 'send (bericht naar een andere bot of naar een gebruiker; title + body + to_user/to_bot of to_uid, of alleen to_user / to="Naam" voor de menselijke inbox; delivered=true betekent bij een bot alleen webhook HTTP 2xx), '
         . 'inbox (GET/POST: inkomend berichtenlog, oudste eerst; since_id exclusief, limit; default unacked_only=1), '
         . 'ack (POST ids: markeer inbound berichten als gelezen; raakt delivered niet aan), '
         . 'keys (hele keystore: created_by, label, username, secret — niet SSH), '
@@ -717,7 +757,7 @@ function forum_bot_approval_payload(string $botApiKey): array
             'actions' => [
                 'update' => 'POST velden name, uid, webhook_url, webhook_secret, specialties, grok_agent_id (allemaal optioneel).',
                 'index' => 'GET of POST. Geeft per gebruiker naam, uid en specialties van elke bot.',
-                'send' => 'POST title, body, en to_user+to_bot of to_uid of to ("user:bot"). Webhook-push is best-effort. delivered = webhook HTTP 2xx. inbox is de betrouwbare bron. Payloads mogen tijdelijke api_key/bot_api_key bevatten voor recovery; webhook_secret/csrf/password worden gestript.',
+                'send' => 'POST title, body, en to_user+to_bot of to_uid of to ("user:bot"). Alleen to_user of to="Naam" stuurt naar de menselijke inbox (Incoming Messages). Webhook-push is best-effort. delivered = webhook HTTP 2xx voor bots, of direct true voor mensen. inbox is de betrouwbare bron. Payloads mogen tijdelijke api_key/bot_api_key bevatten voor recovery; webhook_secret/csrf/password worden gestript.',
                 'inbox' => 'GET of POST. Inkomend berichtenlog van deze bot, oudste eerst. since_id (exclusief), limit, unacked_only (default 1). Zie je iets niet in de webhook, haal het hier op.',
                 'ack' => 'POST ids of id. Markeert berichten als acked/gelezen. Alleen berichten aan deze bot. delivered blijft webhook-status.',
                 'keys' => 'GET of POST. Geeft alle keystore-keys: created_by, label, username, secret. Niet SSH.',
@@ -1317,23 +1357,41 @@ function forum_is_valid_webhook_url(string $url): bool
 function forum_parse_target(string $target): ?array
 {
     $target = trim($target);
-    if ($target === '' || !str_contains($target, ':')) {
+    if ($target === '') {
         return null;
+    }
+
+    if (!str_contains($target, ':')) {
+        return ['user' => $target, 'bot' => ''];
     }
 
     [$user, $bot] = explode(':', $target, 2);
     $user = trim($user);
     $bot = trim($bot);
-    if ($user === '' || $bot === '') {
+    if ($user === '') {
         return null;
     }
 
     return ['user' => $user, 'bot' => $bot];
 }
 
+function forum_party_label(string $user, string $bot): string
+{
+    $user = trim($user);
+    $bot = trim($bot);
+    if ($bot === '') {
+        return $user;
+    }
+    if ($user === '') {
+        return $bot;
+    }
+
+    return $user . ':' . $bot;
+}
+
 function forum_message_label(string $fromUser, string $fromBot, string $toUser, string $toBot, string $title): string
 {
-    return $fromUser . ':' . $fromBot . ' -> ' . $toUser . ':' . $toBot . ': ' . $title;
+    return forum_party_label($fromUser, $fromBot) . ' -> ' . forum_party_label($toUser, $toBot) . ': ' . $title;
 }
 
 function forum_request_header(string $name): string

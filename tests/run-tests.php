@@ -1135,6 +1135,113 @@ forum_test('legacy bots table gets grok_agent_id column', function () use ($temp
     }
 });
 
+forum_test('human can message a bot and a bot can message a human', function () use ($store, $dbPath, &$webhooks): void {
+    $sender = $store->findBotByUid('asclepius-1');
+    $target = $store->findBotByUid('mercurius-1');
+    forum_assert($sender !== null && $target !== null, 'Bots ontbreken.');
+    $senderLabel = (string) $sender['owner_name'] . ':' . (string) $sender['name'];
+    $tim = ['email' => 'tfalken@kvt.nl', 'name' => 'Tim Falken'];
+    $milan = ['email' => 'milanscheenloop@kvt.nl', 'name' => 'Milan Scheenloop'];
+    $session = [
+        'email' => 'tfalken@kvt.nl',
+        'name' => 'Tim Falken',
+        'api_key' => 'access-tim',
+        'oid' => 'tim',
+        'forum_csrf' => 'csrf-human',
+    ];
+
+    $webhooks = [];
+    $humanToBot = $store->sendHumanMessage($tim, [
+        'bot_id' => (int) $target['id'],
+        'title' => 'Hallo Mercurius',
+        'body' => 'kun je dit?',
+    ]);
+    forum_assert($humanToBot['delivered'] === true, 'Mens naar bot moet webhook doen.');
+    forum_assert(($humanToBot['message']['from_kind'] ?? '') === 'user', 'from_kind moet user zijn.');
+    forum_assert(($humanToBot['message']['label'] ?? '') === 'Tim Falken -> Milan Scheenloop:Mercurius: Hallo Mercurius', 'Label mens-naar-bot klopt niet.');
+    $inbox = $store->listInbox($target);
+    $titles = array_map(static fn(array $message): string => (string) $message['title'], $inbox);
+    forum_assert(in_array('Hallo Mercurius', $titles, true), 'Bot-inbox miste het menselijke bericht.');
+
+    $webhooks = [];
+    $botToHuman = $store->sendMessage($sender, [
+        'to_user' => 'Tim Falken',
+        'title' => 'Terug naar Tim',
+        'body' => 'hier is je antwoord',
+    ]);
+    forum_assert($botToHuman['delivered'] === true, 'Bot naar mens moet direct delivered zijn.');
+    forum_assert(($botToHuman['webhook_attempts'] ?? -1) === 0, 'Bot naar mens mag geen webhook sturen.');
+    forum_assert(($botToHuman['message']['to_kind'] ?? '') === 'user', 'to_kind moet user zijn.');
+    forum_assert(($botToHuman['message']['label'] ?? '') === $senderLabel . ' -> Tim Falken: Terug naar Tim', 'Label bot-naar-mens klopt niet.');
+    forum_assert($webhooks === [], 'Webhook naar een mens mag niet.');
+    forum_assert($store->countUnackedHumanInbox($tim) === 1, 'Incoming-count voor Tim klopt niet.');
+    forum_assert($store->countUnackedHumanInbox($milan) === 0, 'Milan mag Tims inbox niet zien.');
+
+    $humanInbox = $store->listHumanInbox($tim);
+    forum_assert(count($humanInbox) === 1 && $humanInbox[0]['title'] === 'Terug naar Tim', 'Human inbox miste het botbericht.');
+    $botInboxAfter = $store->listInbox($sender, 0, 50, false);
+    $botTitles = array_map(static fn(array $message): string => (string) $message['title'], $botInboxAfter);
+    forum_assert(!in_array('Terug naar Tim', $botTitles, true), 'Bot-inbox mag geen menselijke inbox-berichten bevatten.');
+
+    $shortcut = $store->sendMessage($target, [
+        'to' => 'Tim Falken',
+        'title' => 'Via to-veld',
+        'body' => 'shortcut',
+    ]);
+    forum_assert($shortcut['delivered'] === true, 'to=naam moet een gebruiker raken.');
+    forum_assert($store->countUnackedHumanInbox($tim) === 2, 'Tweede incoming ontbreekt.');
+
+    $directory = $store->listDirectory('tfalken@kvt.nl');
+    forum_assert($directory !== [], 'Directory van anderen is leeg.');
+    foreach ($directory as $owner) {
+        forum_assert(strtolower((string) ($owner['email'] ?? '')) !== 'tfalken@kvt.nl', 'Directory bevat eigen bots.');
+        foreach ($owner['bots'] as $bot) {
+            forum_assert(!array_key_exists('bot_api_key', $bot) && !array_key_exists('webhook_secret', $bot) && !array_key_exists('webhook_url', $bot), 'Directory lekt secrets.');
+            forum_assert(isset($bot['id'], $bot['name']), 'Directory-bot mist id/naam.');
+        }
+    }
+
+    $state = forum_call_api($dbPath, 'GET', ['action' => 'state'], '', $session);
+    forum_assert(($state['status'] ?? 0) === 200, 'state met sessie moet slagen.');
+    forum_assert((int) ($state['json']['incoming_count'] ?? 0) === 2, 'state incoming_count klopt niet.');
+    forum_assert(isset($state['json']['directory']) && is_array($state['json']['directory']), 'state mist directory.');
+
+    $opened = forum_call_api($dbPath, 'POST', [
+        'action' => 'message',
+        'id' => (int) $botToHuman['message']['id'],
+        'csrf' => 'csrf-human',
+    ], '', $session);
+    forum_assert(($opened['json']['message']['can_reply'] ?? false) === true, 'Incoming bericht moet can_reply hebben.');
+    forum_assert($store->countUnackedHumanInbox($tim) === 1, 'Openen had het bericht moeten acken.');
+
+    $reply = forum_call_api($dbPath, 'POST', [
+        'action' => 'human_send',
+        'in_reply_to' => (int) $botToHuman['message']['id'],
+        'body' => 'dank je',
+        'csrf' => 'csrf-human',
+    ], '', $session);
+    forum_assert(in_array((int) ($reply['status'] ?? 0), [200, 502], true), 'human_send reply faalde: ' . ($reply['raw'] ?? ''));
+    forum_assert(($reply['json']['error'] ?? '') !== 'Ongeldige bot API-key of webhook_secret.', 'human_send mag geen bot-auth eisen.');
+    $senderInbox = $store->listInbox($sender);
+    $replyTitles = array_map(static fn(array $message): string => (string) $message['title'], $senderInbox);
+    forum_assert(in_array('Re: Terug naar Tim', $replyTitles, true), 'Reply kwam niet in de bot-inbox.');
+
+    $compose = forum_call_api($dbPath, 'POST', [
+        'action' => 'human_send',
+        'bot_id' => (int) $sender['id'],
+        'title' => 'Direct',
+        'body' => 'via UI',
+        'csrf' => 'csrf-human',
+    ], '', $session);
+    forum_assert(in_array((int) ($compose['status'] ?? 0), [200, 502], true), 'human_send via bot_id faalde.');
+
+    $js = (string) file_get_contents(dirname(__DIR__) . '/web/app.js');
+    $html = (string) file_get_contents(dirname(__DIR__) . '/web/index.php');
+    forum_assert(str_contains($html, 'Incoming Messages'), 'UI mist Incoming Messages-knop.');
+    forum_assert(str_contains($js, 'human_send') && str_contains($js, 'data-compose-bot'), 'UI mist compose naar bots.');
+    forum_assert(str_contains($js, 'messageReply') && str_contains($js, 'Andere gebruikers'), 'UI mist reply of andermans bots.');
+});
+
 forum_test('failed approval webhook keeps the request pending', function () use ($tempDir): void {
     $failStore = new ForumStore($tempDir . '/fail.sqlite');
     $failStore->touchUser('cvrij@kvt.nl', 'Cees', 'access-cees');

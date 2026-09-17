@@ -1,10 +1,15 @@
 (function () {
     const config = window.FORUM || {};
     const state = {
+        user: { name: '', email: '' },
         bots: [],
+        directory: [],
         messages: [],
+        incoming: [],
         pendingCount: 0,
-        selectedBotId: 0,
+        incomingCount: 0,
+        expandedOwners: {},
+        openMessageId: 0,
         keys: [],
         requests: []
     };
@@ -15,6 +20,10 @@
         botCount: document.getElementById('botCount'),
         requestBtn: document.getElementById('requestBtn'),
         requestCount: document.getElementById('requestCount'),
+        incomingBtn: document.getElementById('incomingBtn'),
+        incomingCount: document.getElementById('incomingCount'),
+        incomingModal: document.getElementById('incomingModal'),
+        incomingBody: document.getElementById('incomingBody'),
         accessKeyBtn: document.getElementById('accessKeyBtn'),
         accessKeyModal: document.getElementById('accessKeyModal'),
         accessKeyValue: document.getElementById('accessKeyValue'),
@@ -31,6 +40,16 @@
         messageTitle: document.getElementById('messageTitle'),
         messageBody: document.getElementById('messageBody'),
         messageWebhook: document.getElementById('messageWebhook'),
+        messageReply: document.getElementById('messageReply'),
+        messageReplyBody: document.getElementById('messageReplyBody'),
+        messageReplySend: document.getElementById('messageReplySend'),
+        composeModal: document.getElementById('composeModal'),
+        composeTitle: document.getElementById('composeTitle'),
+        composeTarget: document.getElementById('composeTarget'),
+        composeBotId: document.getElementById('composeBotId'),
+        composeTitleInput: document.getElementById('composeTitleInput'),
+        composeBody: document.getElementById('composeBody'),
+        composeSend: document.getElementById('composeSend'),
         botEditModal: document.getElementById('botEditModal'),
         botEditId: document.getElementById('botEditId'),
         botEditName: document.getElementById('botEditName'),
@@ -41,6 +60,8 @@
         botEditSave: document.getElementById('botEditSave'),
         flash: document.getElementById('flash')
     };
+
+    const gearSvg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.1 7.1 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 2h-3.8a.5.5 0 0 0-.49.42l-.36 2.54c.59.22-1.14.53-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.8 8.48a.5.5 0 0 0 .12.64L4.95 10.7c-.04.31-.06.63-.06.94s.02.63.06.94L2.92 14.16a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.43.34.68.22l2.39-.96c.49.4 1.04.72 1.63.94l.36 2.54c.05.24.25.42.49.42h3.8c.24 0 .44-.18.49-.42l.36-2.54c.59-.22 1.14-.53 1.63-.94l2.39.96c.25.12.54.02.68-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.02-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>';
 
     function api(action, payload, method) {
         const body = Object.assign({ action: action, csrf: config.csrf || '' }, payload || {});
@@ -79,6 +100,9 @@
     function closeModal(modal) {
         if (modal) {
             modal.classList.remove('is-open');
+            if (modal === els.messageModal) {
+                state.openMessageId = 0;
+            }
         }
     }
 
@@ -117,38 +141,85 @@
         );
     }
 
+    function composeLabel(bot) {
+        const owner = bot.owner_name || bot.owner_email || '';
+        return owner ? (owner + ':' + (bot.name || '')) : (bot.name || '');
+    }
+
+    function botCardHtml(bot, own) {
+        const tags = (bot.specialties || []).map(function (item) {
+            return '<span class="tag">' + escapeHtml(item) + '</span>';
+        }).join('');
+        const gear = own
+            ? ('<button type="button" class="bot-gear" data-bot-settings="' + bot.id + '" title="Bot instellen" aria-label="Bot instellen">' + gearSvg + '</button>')
+            : '';
+        const token = own && bot.bot_api_key
+            ? '<div class="meta">API-token</div><code class="token">' + escapeHtml(bot.bot_api_key) + '</code>'
+            : '';
+        const identity = own
+            ? identityMeta(bot)
+            : '<div class="meta">' + (bot.uid ? 'UID: ' + escapeHtml(bot.uid) : 'Geen UID') + '</div>';
+        return (
+            '<div class="bot-card" data-compose-bot="' + bot.id + '" data-compose-label="' + escapeHtml(composeLabel(bot)) + '">' +
+                '<div class="bot-card-top">' +
+                    '<strong>' + escapeHtml(bot.name) + '</strong>' +
+                    gear +
+                '</div>' +
+                identity +
+                token +
+                (tags ? '<div class="tags">' + tags + '</div>' : '') +
+                '<div class="meta compose-hint">Klik om een bericht te sturen</div>' +
+            '</div>'
+        );
+    }
+
+    function captureExpandedOwners() {
+        if (!els.botList) {
+            return;
+        }
+        const next = {};
+        els.botList.querySelectorAll('details.owner-group[data-owner-email]').forEach(function (node) {
+            if (node.open) {
+                next[node.getAttribute('data-owner-email') || ''] = true;
+            }
+        });
+        state.expandedOwners = next;
+    }
+
     function renderBots() {
         if (!els.botList) {
             return;
         }
+        captureExpandedOwners();
         if (els.botCount) {
             els.botCount.textContent = String(state.bots.length);
         }
-        if (state.bots.length === 0) {
-            els.botList.innerHTML = '<div class="empty">Nog geen bots. Deel je Access Key zodat een bot zich kan aanmelden.</div>';
-            return;
-        }
-        els.botList.innerHTML = state.bots.map(function (bot) {
-            const tags = (bot.specialties || []).map(function (item) {
-                return '<span class="tag">' + escapeHtml(item) + '</span>';
+        const ownHtml = state.bots.length === 0
+            ? '<div class="empty">Nog geen bots. Deel je Access Key zodat een bot zich kan aanmelden.</div>'
+            : state.bots.map(function (bot) {
+                return botCardHtml(bot, true);
             }).join('');
-            const active = Number(bot.id) === Number(state.selectedBotId) ? ' is-active' : '';
-            return (
-                '<div class="bot-card' + active + '" data-bot-id="' + bot.id + '">' +
-                    '<div class="bot-card-top">' +
-                        '<strong>' + escapeHtml(bot.name) + '</strong>' +
-                        '<button type="button" class="bot-gear" data-bot-settings="' + bot.id + '" title="Bot instellen" aria-label="Bot instellen">' +
-                            '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.1 7.1 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 2h-3.8a.5.5 0 0 0-.49.42l-.36 2.54c-.59.22-1.14.53-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.8 8.48a.5.5 0 0 0 .12.64L4.95 10.7c-.04.31-.06.63-.06.94s.02.63.06.94L2.92 14.16a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.43.34.68.22l2.39-.96c.49.4 1.04.72 1.63.94l.36 2.54c.05.24.25.42.49.42h3.8c.24 0 .44-.18.49-.42l.36-2.54c.59-.22 1.14-.53 1.63-.94l2.39.96c.25.12.54.02.68-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.02-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>' +
-                        '</button>' +
-                    '</div>' +
-                    identityMeta(bot) +
-                    (bot.bot_api_key
-                        ? '<div class="meta">API-token</div><code class="token">' + escapeHtml(bot.bot_api_key) + '</code>'
-                        : '') +
-                    (tags ? '<div class="tags">' + tags + '</div>' : '') +
-                '</div>'
-            );
-        }).join('');
+        const others = state.directory || [];
+        let otherHtml = '';
+        if (others.length > 0) {
+            otherHtml = '<div class="other-bots-head">Andere gebruikers</div>' + others.map(function (owner) {
+                const email = owner.email || owner.name || '';
+                const open = state.expandedOwners[email] ? ' open' : '';
+                const bots = (owner.bots || []).map(function (bot) {
+                    return botCardHtml(bot, false);
+                }).join('');
+                return (
+                    '<details class="owner-group" data-owner-email="' + escapeHtml(email) + '"' + open + '>' +
+                        '<summary>' +
+                            escapeHtml(owner.name || owner.email || 'Onbekend') +
+                            '<span>' + (owner.bots || []).length + '</span>' +
+                        '</summary>' +
+                        bots +
+                    '</details>'
+                );
+            }).join('');
+        }
+        els.botList.innerHTML = ownHtml + otherHtml;
     }
 
     function renderMessages() {
@@ -162,14 +233,17 @@
         els.logList.innerHTML = state.messages.map(function (message) {
             const failed = message.delivered ? '' : ' is-failed';
             const webhookNote = message.delivered
-                ? 'Webhook HTTP 2xx'
+                ? (message.to_kind === 'user' ? 'Afgeleverd in Incoming Messages' : 'Webhook HTTP 2xx')
                 : (message.delivery_error || 'Webhook mislukt');
+            const status = message.to_kind === 'user'
+                ? (message.acked ? 'gelezen' : 'inbox')
+                : (message.delivered ? 'HTTP 2xx' : 'webhook fout');
             return (
                 '<button type="button" class="log-row' + failed + '" data-message-id="' + message.id + '" title="' + escapeHtml(webhookNote) + '">' +
                     '<span class="label">' + escapeHtml(message.label) + '</span>' +
                     '<span class="time">' +
                         escapeHtml(formatTime(message.created_at)) +
-                        '<span class="webhook-status">' + escapeHtml(message.delivered ? 'HTTP 2xx' : 'webhook fout') + '</span>' +
+                        '<span class="webhook-status">' + escapeHtml(status) + '</span>' +
                     '</span>' +
                 '</button>'
             );
@@ -185,6 +259,39 @@
         if (els.requestCount) {
             els.requestCount.textContent = String(count);
         }
+    }
+
+    function updateIncomingButton() {
+        if (!els.incomingBtn) {
+            return;
+        }
+        const count = Number(state.incomingCount || 0);
+        els.incomingBtn.classList.toggle('has-pending', count > 0);
+        if (els.incomingCount) {
+            els.incomingCount.textContent = String(count);
+        }
+    }
+
+    function renderIncoming() {
+        if (!els.incomingBody) {
+            return;
+        }
+        if (state.incoming.length === 0) {
+            els.incomingBody.innerHTML = '<div class="empty">Geen berichten aan jou.</div>';
+            return;
+        }
+        els.incomingBody.innerHTML = state.incoming.map(function (message) {
+            const unread = message.acked ? '' : ' is-unread';
+            return (
+                '<button type="button" class="log-row incoming-row' + unread + '" data-incoming-id="' + message.id + '">' +
+                    '<span class="label">' + escapeHtml(message.label) + '</span>' +
+                    '<span class="time">' +
+                        escapeHtml(formatTime(message.created_at)) +
+                        '<span class="webhook-status">' + escapeHtml(message.acked ? 'gelezen' : 'nieuw') + '</span>' +
+                    '</span>' +
+                '</button>'
+            );
+        }).join('');
     }
 
     function renderRequests() {
@@ -244,22 +351,31 @@
 
     function applyState(data) {
         state.bots = data.bots || [];
+        state.directory = data.directory || [];
         state.messages = data.messages || [];
         state.pendingCount = data.pending_count || 0;
-        if (data.user && data.user.access_key && els.accessKeyValue) {
-            els.accessKeyValue.textContent = data.user.access_key;
+        state.incomingCount = data.incoming_count || 0;
+        if (data.user) {
+            state.user = {
+                name: data.user.name || '',
+                email: data.user.email || ''
+            };
+            if (data.user.access_key && els.accessKeyValue) {
+                els.accessKeyValue.textContent = data.user.access_key;
+            }
         }
         state.keys = data.keys || [];
         renderBots();
         renderMessages();
         updateRequestButton();
+        updateIncomingButton();
         if (!keystoreIsEditing()) {
             renderKeys();
         }
     }
 
     function refreshState() {
-        return api('state', { bot_id: state.selectedBotId || 0 }).then(function (data) {
+        return api('state').then(function (data) {
             if (!data.success) {
                 return;
             }
@@ -279,6 +395,89 @@
                 renderRequests();
             }
         }).catch(function () {});
+    }
+
+    function refreshIncoming() {
+        return api('human_inbox').then(function (data) {
+            if (!data.success) {
+                return;
+            }
+            state.incomingCount = data.incoming_count || 0;
+            state.incoming = data.messages || [];
+            updateIncomingButton();
+            if (els.incomingModal && els.incomingModal.classList.contains('is-open')) {
+                renderIncoming();
+            }
+        }).catch(function () {});
+    }
+
+    function openCompose(botId, label) {
+        if (els.composeBotId) {
+            els.composeBotId.value = String(botId);
+        }
+        if (els.composeTarget) {
+            els.composeTarget.textContent = 'Naar ' + label;
+        }
+        if (els.composeTitle) {
+            els.composeTitle.textContent = 'Bericht naar ' + label;
+        }
+        if (els.composeTitleInput) {
+            els.composeTitleInput.value = '';
+        }
+        if (els.composeBody) {
+            els.composeBody.value = '';
+        }
+        openModal(els.composeModal);
+        if (els.composeTitleInput) {
+            els.composeTitleInput.focus();
+        }
+    }
+
+    function showMessage(message) {
+        state.openMessageId = Number(message.id || 0);
+        if (els.messageTitle) {
+            els.messageTitle.textContent = message.label || 'Bericht';
+        }
+        if (els.messageWebhook) {
+            const toUser = message.to_kind === 'user';
+            els.messageWebhook.classList.toggle('is-failed', !message.delivered && !toUser);
+            if (toUser) {
+                els.messageWebhook.textContent = message.acked
+                    ? 'Afgeleverd in je inbox (gelezen).'
+                    : 'Afgeleverd in Incoming Messages.';
+            } else {
+                els.messageWebhook.textContent = message.delivered
+                    ? 'Webhook: HTTP 2xx — dat is geen bewijs dat de bot het bericht zag. inbox blijft de betrouwbare bron.'
+                    : ('Webhook mislukt: ' + (message.delivery_error || 'geen details'));
+            }
+        }
+        if (els.messageBody) {
+            els.messageBody.textContent = message.body || '';
+        }
+        if (els.messageReply) {
+            els.messageReply.hidden = !message.can_reply;
+        }
+        if (els.messageReplyBody) {
+            els.messageReplyBody.value = '';
+        }
+        openModal(els.messageModal);
+        if (message.can_reply && els.messageReplyBody) {
+            els.messageReplyBody.focus();
+        }
+        updateIncomingButton();
+        if (els.incomingModal && els.incomingModal.classList.contains('is-open')) {
+            refreshIncoming();
+        }
+    }
+
+    function openMessage(messageId) {
+        return api('message', { id: messageId }, 'POST').then(function (data) {
+            if (!data.success || !data.message) {
+                showFlash(data.error || 'Bericht laden mislukt.', false);
+                return;
+            }
+            showMessage(data.message);
+        });
     }
 
     function openBotEdit(botId) {
@@ -320,6 +519,23 @@
         });
     }
 
+    function sendHuman(payload) {
+        return api('human_send', payload).then(function (data) {
+            if (!data.success && data._status !== 502) {
+                showFlash(data.error || 'Versturen mislukt.', false);
+                return false;
+            }
+            if (data.delivered) {
+                showFlash('Bericht verstuurd.', true);
+            } else {
+                showFlash(data.error || 'Bericht opgeslagen, webhook mislukte.', false);
+            }
+            return refreshState().then(function () {
+                return true;
+            });
+        });
+    }
+
     document.addEventListener('click', function (event) {
         const target = event.target;
         if (!(target instanceof Element)) {
@@ -342,36 +558,24 @@
             return;
         }
 
-        const botCard = target.closest('[data-bot-id]');
-        if (botCard && els.botList && els.botList.contains(botCard)) {
-            const botId = Number(botCard.getAttribute('data-bot-id') || 0);
-            state.selectedBotId = state.selectedBotId === botId ? 0 : botId;
-            refreshState();
+        const composeCard = target.closest('[data-compose-bot]');
+        if (composeCard && els.botList && els.botList.contains(composeCard) && !target.closest('summary')) {
+            openCompose(
+                Number(composeCard.getAttribute('data-compose-bot') || 0),
+                composeCard.getAttribute('data-compose-label') || 'bot'
+            );
+            return;
+        }
+
+        const incomingRow = target.closest('[data-incoming-id]');
+        if (incomingRow) {
+            openMessage(Number(incomingRow.getAttribute('data-incoming-id') || 0));
             return;
         }
 
         const logRow = target.closest('[data-message-id]');
         if (logRow && els.logList && els.logList.contains(logRow)) {
-            const messageId = Number(logRow.getAttribute('data-message-id') || 0);
-            api('message', { id: messageId }, 'POST').then(function (data) {
-                if (!data.success || !data.message) {
-                    showFlash(data.error || 'Bericht laden mislukt.', false);
-                    return;
-                }
-                if (els.messageTitle) {
-                    els.messageTitle.textContent = data.message.label;
-                }
-                if (els.messageWebhook) {
-                    els.messageWebhook.classList.toggle('is-failed', !data.message.delivered);
-                    els.messageWebhook.textContent = data.message.delivered
-                        ? 'Webhook: HTTP 2xx — dat is geen bewijs dat de bot het bericht zag. inbox blijft de betrouwbare bron.'
-                        : ('Webhook mislukt: ' + (data.message.delivery_error || 'geen details'));
-                }
-                if (els.messageBody) {
-                    els.messageBody.textContent = data.message.body || '';
-                }
-                openModal(els.messageModal);
-            });
+            openMessage(Number(logRow.getAttribute('data-message-id') || 0));
             return;
         }
 
@@ -487,11 +691,63 @@
             });
         });
     }
+    if (els.composeSend) {
+        els.composeSend.addEventListener('click', function () {
+            const botId = els.composeBotId ? Number(els.composeBotId.value || 0) : 0;
+            const title = els.composeTitleInput ? els.composeTitleInput.value.trim() : '';
+            const body = els.composeBody ? els.composeBody.value : '';
+            if (!title) {
+                showFlash('Titel is verplicht.', false);
+                return;
+            }
+            els.composeSend.disabled = true;
+            sendHuman({ bot_id: botId, title: title, body: body }).then(function (ok) {
+                if (ok) {
+                    closeModal(els.composeModal);
+                }
+            }).finally(function () {
+                els.composeSend.disabled = false;
+            });
+        });
+    }
+    if (els.messageReplySend) {
+        els.messageReplySend.addEventListener('click', function () {
+            const body = els.messageReplyBody ? els.messageReplyBody.value.trim() : '';
+            if (!body) {
+                showFlash('Typ eerst een antwoord.', false);
+                return;
+            }
+            if (!state.openMessageId) {
+                showFlash('Geen bericht om te beantwoorden.', false);
+                return;
+            }
+            els.messageReplySend.disabled = true;
+            sendHuman({
+                in_reply_to: state.openMessageId,
+                body: body
+            }).then(function (ok) {
+                if (ok) {
+                    closeModal(els.messageModal);
+                    return refreshIncoming();
+                }
+            }).finally(function () {
+                els.messageReplySend.disabled = false;
+            });
+        });
+    }
     if (els.requestBtn) {
         els.requestBtn.addEventListener('click', function () {
             refreshRequests().then(function () {
                 renderRequests();
                 openModal(els.requestsModal);
+            });
+        });
+    }
+    if (els.incomingBtn) {
+        els.incomingBtn.addEventListener('click', function () {
+            refreshIncoming().then(function () {
+                renderIncoming();
+                openModal(els.incomingModal);
             });
         });
     }
@@ -545,8 +801,10 @@
     });
 
     refreshState();
+    refreshIncoming();
     window.setInterval(function () {
         refreshState();
         refreshRequests();
+        refreshIncoming();
     }, 1000);
 })();
