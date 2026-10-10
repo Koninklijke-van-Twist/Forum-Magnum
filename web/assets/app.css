@@ -137,3 +137,13 @@ form.inline { display: inline; }
 }
 .post.is-deleted .post-main { background: #fdecec; }
 .post-body.deleted { color: #8a1c1c; font-style: italic; }
+
+/* Bijlagen */
+.attachments { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.attachment { display: flex; flex-direction: column; gap: 4px; max-width: 220px; }
+.attachment-thumb img { display: block; max-width: 220px; max-height: 160px; border-radius: 6px; border: 1px solid var(--line); object-fit: cover; }
+.attachment-link { font-size: .88rem; overflow-wrap: anywhere; }
+.message-md .attachment { margin: 6px 0; }
+.file-input { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; font-size: .85rem; color: var(--muted); cursor: pointer; max-width: 70%; }
+.file-input input { font-size: .82rem; max-width: 100%; }
+.attachment-removes { display: flex; flex-direction: column; gap: 2px; font-size: .88rem; }

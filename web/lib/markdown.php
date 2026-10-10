@@ -23,15 +23,29 @@ function fm_asclepius_base_url(): string
     return rtrim($base !== '' ? $base : 'https://sleutels.kvt.nl/asclepius', '/') . '/';
 }
 
-/** Forum: het forum kent geen bijlagen; [[attachment:x]] blijft gewone tekst. */
+/** Forum: [[attachment:naam]] zoekt de bijlage van dit bericht op originele naam (zoals Asclepius). */
 function findAttachmentByOriginalName(array $attachments, string $name): ?array
 {
+    foreach ($attachments as $attachment) {
+        if ((string) ($attachment['original_name'] ?? '') === $name) {
+            return $attachment;
+        }
+    }
+
     return null;
 }
 
 function renderMessageInlineAttachmentHtml(array $attachment): string
 {
-    return '';
+    return fm_attachment_html($attachment);
+}
+
+/** Forum: namen die via [[attachment:naam]] al in de tekst staan (zoals extractReferencedAttachmentNames). */
+function fm_referenced_attachment_names(string $text): array
+{
+    preg_match_all('/^\s*\[\[attachment:(.+)\]\]\s*$/m', $text, $m);
+
+    return array_map('trim', $m[1] ?? []);
 }
 
 function getShortcutKeyDefinitions(): array

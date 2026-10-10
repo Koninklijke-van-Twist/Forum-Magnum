@@ -10,13 +10,14 @@ declare(strict_types=1);
  * reads       per gebruiker per thread het laatst gelezen bericht.
  * user_prefs  taal per gebruiker.
  * directory   server-side cache van Entra-gebruikersinfo.
+ * post_attachments  bijlagen per bericht (bestand op schijf via SHA-256, zie attachments.php).
  */
 
 const FM_SECTIONS = ['announcements', 'work', 'general'];
 const FM_THREADS_PER_PAGE = 20;
 const FM_POSTS_PER_PAGE = 50;
 /** Schemaversie in PRAGMA user_version; verhogen bij elke schemawijziging. */
-const FM_SCHEMA_VERSION = 1;
+const FM_SCHEMA_VERSION = 2;
 
 function fm_data_dir(): string
 {
@@ -112,6 +113,20 @@ function fm_migrate(PDO $pdo): void
                 fetched_at INTEGER NOT NULL DEFAULT 0
             )');
         }
+        if ($version < 2) {
+            // Bijlagen: content-addressed bestanden (data/files/ab/cd/<sha256>) + koppeltabel.
+            $pdo->exec('CREATE TABLE IF NOT EXISTS post_attachments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+                hash TEXT NOT NULL,
+                original_name TEXT NOT NULL,
+                mime TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                created_at INTEGER NOT NULL
+            )');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_attachments_post ON post_attachments(post_id, id)');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_attachments_hash ON post_attachments(hash)');
+        }
         $pdo->exec('PRAGMA user_version = ' . FM_SCHEMA_VERSION);
         $pdo->exec('COMMIT');
     } catch (Throwable $e) {
@@ -130,18 +145,45 @@ function fm_migrate(PDO $pdo): void
 function fm_transaction(callable $fn): mixed
 {
     $pdo = fm_db();
+    $GLOBALS['fmGcCandidates'] = [];
     $pdo->exec('BEGIN IMMEDIATE');
     try {
         $result = $fn($pdo);
         $pdo->exec('COMMIT');
-
-        return $result;
     } catch (Throwable $e) {
         try {
             $pdo->exec('ROLLBACK');
         } catch (Throwable) {
         }
+        fm_run_pending_gc($pdo);
         throw $e;
+    }
+    fm_run_pending_gc($pdo);
+
+    return $result;
+}
+
+/**
+ * Bestanden pas na COMMIT/ROLLBACK opruimen, in een eigen BEGIN IMMEDIATE:
+ * zo raakt een teruggedraaide transactie geen bestanden kwijt en blijven
+ * bestanden van een mislukte upload niet als wees achter.
+ */
+function fm_run_pending_gc(PDO $pdo): void
+{
+    $hashes = array_keys($GLOBALS['fmGcCandidates'] ?? []);
+    $GLOBALS['fmGcCandidates'] = [];
+    if ($hashes === [] || !function_exists('fm_gc_files')) {
+        return;
+    }
+    $pdo->exec('BEGIN IMMEDIATE');
+    try {
+        fm_gc_files($pdo, $hashes);
+        $pdo->exec('COMMIT');
+    } catch (Throwable) {
+        try {
+            $pdo->exec('ROLLBACK');
+        } catch (Throwable) {
+        }
     }
 }
 
@@ -200,7 +242,7 @@ function fm_clean_text(string $text, int $max): string
     return trim(mb_substr($text, 0, $max));
 }
 
-function fm_create_thread(string $section, string $email, string $title, string $body, ?int $now = null): int
+function fm_create_thread(string $section, string $email, string $title, string $body, ?int $now = null, array $files = []): int
 {
     $email = strtolower(trim($email));
     if (!fm_can_create_thread($section, $email)) {
@@ -208,15 +250,17 @@ function fm_create_thread(string $section, string $email, string $title, string 
     }
     $title = fm_clean_text(str_replace("\n", ' ', $title), 150);
     $body = fm_clean_text($body, 20000);
-    if ($title === '' || $body === '') {
+    if ($title === '' || ($body === '' && $files === [])) {
         throw new InvalidArgumentException('empty');
     }
+    fm_validate_uploads($files);
     $now ??= time();
-    return fm_transaction(static function (PDO $pdo) use ($section, $title, $email, $body, $now): int {
+    return fm_transaction(static function (PDO $pdo) use ($section, $title, $email, $body, $now, $files): int {
         $pdo->prepare('INSERT INTO threads (section, title, author, created_at, last_post_at) VALUES (?,?,?,?,?)')
             ->execute([$section, $title, $email, $now, $now]);
         $threadId = (int) $pdo->lastInsertId();
-        fm_insert_post($pdo, $threadId, $email, $body, $now);
+        $postId = fm_insert_post($pdo, $threadId, $email, $body, $now);
+        fm_attach_files($pdo, $postId, $files, $now);
 
         return $threadId;
     });
@@ -234,7 +278,7 @@ function fm_insert_post(PDO $pdo, int $threadId, string $email, string $body, in
     return $postId;
 }
 
-function fm_reply(int $threadId, string $email, string $body, ?int $now = null): int
+function fm_reply(int $threadId, string $email, string $body, ?int $now = null, array $files = []): int
 {
     $email = strtolower(trim($email));
     $thread = fm_get_thread($threadId);
@@ -242,32 +286,49 @@ function fm_reply(int $threadId, string $email, string $body, ?int $now = null):
         throw new RuntimeException('forbidden');
     }
     $body = fm_clean_text($body, 20000);
-    if ($body === '') {
+    if ($body === '' && $files === []) {
         throw new InvalidArgumentException('empty');
     }
+    fm_validate_uploads($files);
     $now ??= time();
 
-    return fm_transaction(static fn (PDO $pdo): int => fm_insert_post($pdo, $threadId, $email, $body, $now));
+    return fm_transaction(static function (PDO $pdo) use ($threadId, $email, $body, $now, $files): int {
+        $postId = fm_insert_post($pdo, $threadId, $email, $body, $now);
+        fm_attach_files($pdo, $postId, $files, $now);
+
+        return $postId;
+    });
 }
 
-function fm_edit_post(int $postId, string $email, string $body, ?string $title = null): void
+/**
+ * Eigen bericht bewerken: tekst, (bij het eerste bericht) titel, bijlagen weghalen
+ * ($removeAttachmentIds) of toevoegen ($files).
+ */
+function fm_edit_post(int $postId, string $email, string $body, ?string $title = null, array $files = [], array $removeAttachmentIds = []): void
 {
-    $post = fm_get_post($postId);
-    if ($post === null || !fm_can_edit_post($post, $email)) {
-        throw new RuntimeException('forbidden');
-    }
     $body = fm_clean_text($body, 20000);
-    if ($body === '') {
-        throw new InvalidArgumentException('empty');
-    }
-    fm_db()->prepare('UPDATE posts SET body = ?, edited_at = ?, edited_by = ? WHERE id = ?')
-        ->execute([$body, time(), strtolower($email), $postId]);
-    if ($title !== null && fm_first_post_id((int) $post['thread_id']) === $postId) {
-        $title = fm_clean_text(str_replace("\n", ' ', $title), 150);
-        if ($title !== '') {
-            fm_db()->prepare('UPDATE threads SET title = ? WHERE id = ?')->execute([$title, (int) $post['thread_id']]);
+    $now = time();
+    fm_transaction(static function (PDO $pdo) use ($postId, $email, $body, $title, $files, $removeAttachmentIds, $now): void {
+        $post = fm_get_post($postId);
+        if ($post === null || !fm_can_edit_post($post, $email)) {
+            throw new RuntimeException('forbidden');
         }
-    }
+        fm_detach_files($pdo, $postId, array_map('intval', $removeAttachmentIds));
+        $remaining = count(fm_post_attachments($postId));
+        fm_validate_uploads($files, $remaining);
+        if ($body === '' && $files === [] && $remaining === 0) {
+            throw new InvalidArgumentException('empty');
+        }
+        $pdo->prepare('UPDATE posts SET body = ?, edited_at = ?, edited_by = ? WHERE id = ?')
+            ->execute([$body, $now, strtolower($email), $postId]);
+        fm_attach_files($pdo, $postId, $files, $now);
+        if ($title !== null && fm_first_post_id((int) $post['thread_id']) === $postId) {
+            $title = fm_clean_text(str_replace("\n", ' ', $title), 150);
+            if ($title !== '') {
+                $pdo->prepare('UPDATE threads SET title = ? WHERE id = ?')->execute([$title, (int) $post['thread_id']]);
+            }
+        }
+    });
 }
 
 /**
@@ -289,6 +350,8 @@ function fm_delete_post(int $postId, string $email): void
             throw new RuntimeException('forbidden');
         }
         $pdo->prepare("UPDATE posts SET body = '', deleted_at = ?, deleted_by = ? WHERE id = ?")->execute([time(), strtolower($email), $postId]);
+        // Koppelingen weg; het bestand alleen als niemand er nog naar verwijst.
+        fm_detach_files($pdo, $postId);
         fm_refresh_thread_meta((int) $post['thread_id']);
     });
 }

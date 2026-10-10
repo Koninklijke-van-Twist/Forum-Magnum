@@ -20,17 +20,19 @@ $body = '';
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     $title = (string) ($_POST['title'] ?? '');
     $body = (string) ($_POST['body'] ?? '');
-    if (!fm_csrf_ok()) {
+    if (fm_upload_request_too_large()) {
+        $error = fm_t('err_too_large');
+    } elseif (!fm_csrf_ok()) {
         $error = fm_t('err_csrf');
     } elseif (!$canCreate) {
         http_response_code(403);
         $error = fm_t('err_forbidden');
     } else {
         try {
-            $threadId = fm_create_thread($section, $fmUser, $title, $body);
+            $threadId = fm_create_thread($section, $fmUser, $title, $body, null, fm_normalize_uploads());
             fm_redirect(fm_thread_url($threadId));
-        } catch (InvalidArgumentException) {
-            $error = fm_t('err_empty');
+        } catch (InvalidArgumentException $e) {
+            $error = fm_error_text($e);
         }
     }
 }
@@ -50,10 +52,10 @@ if ($error !== '') {
     echo '<p class="flash error">' . h($error) . '</p>';
 }
 if ($canCreate) {
-    echo '<form method="post" id="new-thread" class="composer' . ($error !== '' ? ' open' : '') . '">' . fm_csrf_field()
+    echo '<form method="post" enctype="multipart/form-data" id="new-thread" class="composer' . ($error !== '' ? ' open' : '') . '">' . fm_csrf_field()
         . '<input type="text" name="title" maxlength="150" required placeholder="' . h(fm_t('title')) . '" aria-label="' . h(fm_t('title')) . '" value="' . h($title) . '">'
         . '<textarea name="body" rows="8" required placeholder="' . h(fm_t('message')) . '" aria-label="' . h(fm_t('message')) . '">' . h($body) . '</textarea>'
-        . '<div class="actions"><button type="submit" class="btn">' . h(fm_t('post')) . '</button></div></form>';
+        . '<div class="actions">' . fm_attachment_input_html() . '<button type="submit" class="btn">' . h(fm_t('post')) . '</button></div></form>';
 }
 
 if ($threads === []) {
