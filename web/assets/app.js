@@ -68,6 +68,11 @@ document.addEventListener('submit', function (e) {
         ta.reportValidity();
     }
 }, true);
-document.addEventListener('input', function (e) {
-    if (e.target.matches && e.target.matches('textarea[data-body-or-files]')) { e.target.setCustomValidity(''); }
+/* Elke wijziging in het formulier (tekst, bestand kiezen, bijlage-vinkje) wist de melding weer,
+   anders blokkeert de browser een later geldige verzending met alleen bijlagen. */
+['input', 'change'].forEach(function (type) {
+    document.addEventListener(type, function (e) {
+        var ta = e.target.form && e.target.form.querySelector('textarea[data-body-or-files]');
+        if (ta) { ta.setCustomValidity(''); }
+    }, true);
 });

@@ -16,9 +16,13 @@ $threadId = (int) $thread['id'];
 $section = (string) $thread['section'];
 $error = '';
 $replyBody = '';
+$editDraft = null; // [postId, body, title] van een mislukte bewerking: ingetypte tekst niet kwijtraken
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     $action = (string) ($_POST['action'] ?? '');
+    if ($action === 'edit') {
+        $editDraft = [(int) ($_POST['post'] ?? 0), (string) ($_POST['body'] ?? ''), isset($_POST['title']) ? (string) $_POST['title'] : null];
+    }
     if (fm_upload_request_too_large()) {
         $error = fm_t('err_too_large');
     } elseif (!fm_csrf_ok()) {
@@ -38,6 +42,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 }
                 fm_edit_post($postId, $fmUser, (string) ($_POST['body'] ?? ''), isset($_POST['title']) ? (string) $_POST['title'] : null,
                     fm_normalize_uploads(), array_map('intval', (array) ($_POST['remove_attachment'] ?? [])));
+                $editDraft = null;
                 fm_redirect('post.php?id=' . $postId);
             } elseif ($action === 'delete') {
                 $postId = (int) ($_POST['post'] ?? 0);
@@ -114,6 +119,7 @@ foreach ($posts as $post) {
     if ($deleted) {
         echo '<div class="post-body deleted">' . h(fm_t('deleted_post')) . '</div>';
     } elseif ($canEdit && $editId === $postId) {
+        $draft = $editDraft !== null && $editDraft[0] === $postId ? $editDraft : null;
         $removeList = '';
         foreach ($attachments as $att) {
             $removeList .= '<label class="attachment-remove"><input type="checkbox" name="remove_attachment[]" value="' . (int) $att['id'] . '"> '
@@ -121,8 +127,8 @@ foreach ($posts as $post) {
         }
         echo '<form method="post" enctype="multipart/form-data" class="composer open">' . fm_csrf_field()
             . '<input type="hidden" name="action" value="edit"><input type="hidden" name="post" value="' . $postId . '">'
-            . ($postId === $firstPostId ? '<input type="text" name="title" maxlength="150" required aria-label="' . h(fm_t('title')) . '" value="' . h((string) $thread['title']) . '">' : '')
-            . '<textarea name="body" rows="8" data-body-or-files data-empty-msg="' . h(fm_t('err_empty')) . '" aria-label="' . h(fm_t('message')) . '">' . h((string) $post['body']) . '</textarea>'
+            . ($postId === $firstPostId ? '<input type="text" name="title" maxlength="150" required aria-label="' . h(fm_t('title')) . '" value="' . h($draft[2] ?? (string) $thread['title']) . '">' : '')
+            . '<textarea name="body" rows="8" data-body-or-files data-empty-msg="' . h(fm_t('err_empty')) . '" aria-label="' . h(fm_t('message')) . '">' . h($draft[1] ?? (string) $post['body']) . '</textarea>'
             . ($removeList !== '' ? '<div class="attachment-removes">' . $removeList . '</div>' : '')
             . '<div class="actions">' . fm_attachment_input_html() . '<a class="btn ghost" href="' . h(fm_thread_url($threadId, $page, $postId)) . '">' . h(fm_t('cancel')) . '</a>'
             . '<button type="submit" class="btn">' . h(fm_t('save')) . '</button></div></form>';

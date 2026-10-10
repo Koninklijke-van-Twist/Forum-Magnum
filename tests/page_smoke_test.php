@@ -164,6 +164,14 @@ check(!str_contains($body, 'name="action" value="edit"'), 'admin krijgt geen bew
 check_same(403, $s, 'admin kan andermans bericht niet bewerken');
 [$s, $body] = $U('GET', 'thread.php?' . parse_url($threadUrl, PHP_URL_QUERY) . '&edit=' . $replyId);
 check(str_contains($body, 'name="action" value="edit"'), 'eigen bewerkformulier');
+$tooMany = ['action' => 'edit', 'csrf' => $csrf, 'post' => $replyId, 'body' => 'net herschreven tekst'];
+$tmpTxt = tempnam(sys_get_temp_dir(), 'fm');
+file_put_contents($tmpTxt, 'x');
+for ($i = 0; $i <= FM_MAX_ATTACHMENTS_PER_POST; $i++) {
+    $tooMany['files[' . $i . ']'] = new CURLFile($tmpTxt, 'text/plain', 'b' . $i . '.txt');
+}
+[$s, $body] = $U('POST', 'thread.php?' . parse_url($threadUrl, PHP_URL_QUERY) . '&edit=' . $replyId, $tooMany);
+check(str_contains($body, 'class="flash error"') && str_contains($body, '>net herschreven tekst</textarea>'), 'mislukte bewerking houdt de ingetypte tekst');
 [$s] = $U('POST', $threadUrl, ['action' => 'edit', 'csrf' => $csrf, 'post' => $replyId, 'body' => 'aangepast door anna']);
 check_same(303, $s, 'gebruiker bewerkt eigen bericht');
 [$s] = $U('POST', $threadUrl, ['action' => 'edit', 'csrf' => $csrf, 'post' => $firstPost, 'body' => 'kaping']);
