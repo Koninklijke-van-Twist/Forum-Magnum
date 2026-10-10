@@ -26,8 +26,13 @@ het logo (`web/thumbnail.png`) is gebleven.
   - `#1185` → ticket 1185 in Asclepius; Asclepius-URL's krijgen het label `Ticket #1185`.
   - `post#123` → forumbericht 123: `post.php?id=123` stuurt door naar de juiste thread,
     de juiste pagina en het bericht (`#p123`). Elk bericht toont zijn eigen `post#…`-link.
-- Eigen berichten bewerken; beheerders bewerken en verwijderen alles (het eerste bericht
-  verwijderen verwijdert de hele thread). Alle formulieren hebben CSRF-bescherming.
+- Berichtmenu (⋯) rechtsboven in een bericht, zichtbaar bij hover (op touch altijd):
+  eigen bericht = Bewerken + Verwijderen, beheerder op andermans bericht = Verwijderen,
+  anders geen menu. Bewerken kan alleen bij je eigen berichten, ook als beheerder
+  (server-side afgedwongen). Bij verwijderen wordt de tekst echt leeggemaakt in de database;
+  het bericht blijft staan als "Bericht verwijderd" (lichtrood, met posterblok) en de
+  thread-metadata (laatste bericht, aantal, ongelezen) wordt in dezelfde `BEGIN IMMEDIATE`-
+  transactie herberekend. Alle formulieren hebben CSRF-bescherming.
 
 ## Op de server
 

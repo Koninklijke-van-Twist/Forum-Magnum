@@ -115,3 +115,20 @@ form.inline { display: inline; }
     .lang-big { grid-template-columns: 1fr 1fr; gap: 10px; }
     .lang-big .flag { width: 72px; height: 48px; }
 }
+
+/* Berichtmenu rechtsboven: bij hover (desktop), altijd zichtbaar op touch. */
+.post-head { position: relative; }
+.post-menu { margin-left: auto; position: relative; }
+.post-menu summary { list-style: none; cursor: pointer; padding: 0 8px; border-radius: 6px; font-size: 1.1rem; line-height: 1.4; color: var(--muted); }
+.post-menu summary::-webkit-details-marker { display: none; }
+.post-menu summary:hover, .post-menu[open] summary { background: var(--bg); color: var(--text); }
+.post-menu-list { position: absolute; right: 0; top: 26px; z-index: 5; background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.15); padding: 4px; min-width: 140px; display: flex; flex-direction: column; }
+.post-menu-list a, .post-menu-list button { display: block; width: 100%; text-align: left; padding: 6px 10px; border: 0; background: none; font: inherit; font-size: .9rem; color: var(--text); text-decoration: none; border-radius: 6px; cursor: pointer; }
+.post-menu-list a:hover, .post-menu-list button:hover { background: var(--bg); }
+.post-menu-list .danger { color: var(--danger); }
+@media (hover: hover) {
+    .post-menu { visibility: hidden; }
+    .post:hover .post-menu, .post-menu[open], .post-menu:focus-within { visibility: visible; }
+}
+.post.is-deleted .post-main { background: #fdecec; }
+.post-body.deleted { color: #8a1c1c; font-style: italic; }

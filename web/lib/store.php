@@ -123,6 +123,28 @@ function fm_migrate(PDO $pdo): void
     }
 }
 
+/**
+ * Schrijftransactie met BEGIN IMMEDIATE: lezen en schrijven gebeuren onder één
+ * schrijflock, zodat gelijktijdige reacties/verwijderingen elkaar niet inhalen.
+ */
+function fm_transaction(callable $fn): mixed
+{
+    $pdo = fm_db();
+    $pdo->exec('BEGIN IMMEDIATE');
+    try {
+        $result = $fn($pdo);
+        $pdo->exec('COMMIT');
+
+        return $result;
+    } catch (Throwable $e) {
+        try {
+            $pdo->exec('ROLLBACK');
+        } catch (Throwable) {
+        }
+        throw $e;
+    }
+}
+
 function fm_is_section(string $section): bool
 {
     return in_array($section, FM_SECTIONS, true);
@@ -159,7 +181,15 @@ function fm_can_edit_post(array $post, string $email): bool
         return false;
     }
 
-    return strtolower((string) $post['author']) === strtolower($email) || fm_is_admin($email);
+    // Alleen je eigen berichten, ook als beheerder.
+    return strtolower((string) $post['author']) === strtolower(trim($email));
+}
+
+function fm_can_delete_post(array $post, string $email): bool
+{
+    // Eigen bericht, of als beheerder ieder bericht.
+    return empty($post['deleted_at'])
+        && (strtolower((string) $post['author']) === strtolower(trim($email)) || fm_is_admin($email));
 }
 
 function fm_clean_text(string $text, int $max): string
@@ -182,20 +212,14 @@ function fm_create_thread(string $section, string $email, string $title, string 
         throw new InvalidArgumentException('empty');
     }
     $now ??= time();
-    $pdo = fm_db();
-    $pdo->beginTransaction();
-    try {
+    return fm_transaction(static function (PDO $pdo) use ($section, $title, $email, $body, $now): int {
         $pdo->prepare('INSERT INTO threads (section, title, author, created_at, last_post_at) VALUES (?,?,?,?,?)')
             ->execute([$section, $title, $email, $now, $now]);
         $threadId = (int) $pdo->lastInsertId();
         fm_insert_post($pdo, $threadId, $email, $body, $now);
-        $pdo->commit();
-    } catch (Throwable $e) {
-        $pdo->rollBack();
-        throw $e;
-    }
 
-    return $threadId;
+        return $threadId;
+    });
 }
 
 function fm_insert_post(PDO $pdo, int $threadId, string $email, string $body, int $now): int
@@ -221,17 +245,9 @@ function fm_reply(int $threadId, string $email, string $body, ?int $now = null):
     if ($body === '') {
         throw new InvalidArgumentException('empty');
     }
-    $pdo = fm_db();
-    $pdo->beginTransaction();
-    try {
-        $id = fm_insert_post($pdo, $threadId, $email, $body, $now ?? time());
-        $pdo->commit();
-    } catch (Throwable $e) {
-        $pdo->rollBack();
-        throw $e;
-    }
+    $now ??= time();
 
-    return $id;
+    return fm_transaction(static fn (PDO $pdo): int => fm_insert_post($pdo, $threadId, $email, $body, $now));
 }
 
 function fm_edit_post(int $postId, string $email, string $body, ?string $title = null): void
@@ -254,29 +270,30 @@ function fm_edit_post(int $postId, string $email, string $body, ?string $title =
     }
 }
 
-/** Admin: bericht verwijderen. Het eerste bericht verwijdert de hele thread. Geeft true als de thread weg is. */
-function fm_delete_post(int $postId, string $email): bool
+/**
+ * Bericht verwijderen (eigenaar of beheerder). De tekst wordt echt leeggemaakt in de database;
+ * het bericht blijft als "Bericht verwijderd" staan (posterblok blijft zichtbaar).
+ */
+function fm_delete_post(int $postId, string $email): void
 {
-    if (!fm_is_admin($email)) {
-        throw new RuntimeException('forbidden');
-    }
-    $post = fm_get_post($postId);
-    if ($post === null) {
-        return false;
-    }
-    $threadId = (int) $post['thread_id'];
-    if (fm_first_post_id($threadId) === $postId) {
-        fm_db()->prepare('DELETE FROM threads WHERE id = ?')->execute([$threadId]);
-
-        return true;
-    }
-    fm_db()->prepare('UPDATE posts SET deleted_at = ?, deleted_by = ? WHERE id = ?')->execute([time(), strtolower($email), $postId]);
-    fm_refresh_thread_meta($threadId);
-
-    return false;
+    // Lezen, leegmaken en metadata herberekenen in één BEGIN IMMEDIATE-transactie.
+    fm_transaction(static function (PDO $pdo) use ($postId, $email): void {
+        $post = fm_get_post($postId);
+        if ($post === null) {
+            throw new RuntimeException('forbidden');
+        }
+        if (!empty($post['deleted_at'])) {
+            return;
+        }
+        if (!fm_can_delete_post($post, $email)) {
+            throw new RuntimeException('forbidden');
+        }
+        $pdo->prepare("UPDATE posts SET body = '', deleted_at = ?, deleted_by = ? WHERE id = ?")->execute([time(), strtolower($email), $postId]);
+        fm_refresh_thread_meta((int) $post['thread_id']);
+    });
 }
 
-/** Laatste bericht en aantal opnieuw bepalen uit de niet-verwijderde berichten. */
+/** Laatste bericht en aantal opnieuw bepalen uit de niet-verwijderde berichten. Aanroepen binnen fm_transaction. */
 function fm_refresh_thread_meta(int $threadId): void
 {
     $st = fm_db()->prepare('SELECT id, author, created_at FROM posts WHERE thread_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 1');

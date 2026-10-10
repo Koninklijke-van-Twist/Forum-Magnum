@@ -69,19 +69,33 @@ $mine = array_values(array_filter(fm_list_threads('general', 'anna@kvt.nl', 1), 
 check_same(0, (int) $mine[0]['unread'], 'verwijderd bericht telt niet als ongelezen');
 check_same(0, fm_first_unread_post_id($m, 'anna@kvt.nl'), 'geen ongelezen anker op verwijderd bericht');
 
-// Bewerken en verwijderen.
+// Bewerken: alleen eigen berichten (ook admins niet bij een ander). Verwijderen: alleen admins.
 $post = fm_get_post($replyId);
 check(fm_can_edit_post($post, 'anna@kvt.nl'), 'eigen bericht bewerken');
+check(fm_can_edit_post($post, 'ANNA@kvt.nl '), 'eigenaar hoofdletterongevoelig');
 check(!fm_can_edit_post($post, 'bob@kvt.nl'), 'andermans bericht niet');
-check(fm_can_edit_post($post, 'tfalken@kvt.nl'), 'admin modereert');
+check(!fm_can_edit_post($post, 'tfalken@kvt.nl'), 'admin bewerkt geen andermans bericht');
+check(fm_can_delete_post($post, 'tfalken@kvt.nl'), 'admin verwijdert andermans bericht');
+check(fm_can_delete_post($post, 'anna@kvt.nl'), 'eigenaar verwijdert eigen bericht');
+check(!fm_can_delete_post($post, 'bob@kvt.nl'), 'ander verwijdert niet');
 fm_edit_post($replyId, 'anna@kvt.nl', 'aangepast');
 check_same('aangepast', fm_get_post($replyId)['body'], 'bewerkt');
 check_throws(fn () => fm_edit_post($replyId, 'bob@kvt.nl', 'hack'), RuntimeException::class, 'bewerken door ander geweigerd');
-check_throws(fn () => fm_delete_post($replyId, 'anna@kvt.nl'), RuntimeException::class, 'verwijderen alleen admin');
-check(!fm_delete_post($replyId, 'tfalken@kvt.nl'), 'reactie verwijderd, thread blijft');
-check(!empty(fm_get_post($replyId)['deleted_at']), 'gemarkeerd als verwijderd');
-check(fm_delete_post(fm_first_post_id($b), 'tfalken@kvt.nl'), 'eerste bericht verwijdert thread');
-check(fm_get_thread($b) === null, 'thread weg');
+check_throws(fn () => fm_edit_post($replyId, 'tfalken@kvt.nl', 'hack'), RuntimeException::class, 'bewerken door admin van andermans bericht geweigerd');
+check_same('aangepast', fm_get_post($replyId)['body'], 'tekst onveranderd na geweigerde bewerking');
+check_throws(fn () => fm_delete_post($replyId, 'bob@kvt.nl'), RuntimeException::class, 'verwijderen door ander geweigerd');
+check(empty(fm_get_post($replyId)['deleted_at']), 'na weigering niet verwijderd');
+$own = fm_reply($ann, 'bob@kvt.nl', 'oeps', 1200);
+fm_delete_post($own, 'bob@kvt.nl');
+check(fm_get_post($own)['body'] === '' && !empty(fm_get_post($own)['deleted_at']), 'eigenaar verwijdert eigen bericht (tekst leeg)');
+fm_delete_post($replyId, 'tfalken@kvt.nl');
+$gone = fm_get_post($replyId);
+check(!empty($gone['deleted_at']) && $gone['body'] === '', 'verwijderd: tekst echt leeg in de database');
+check_same('anna@kvt.nl', $gone['author'], 'auteur (posterblok) blijft');
+check(!fm_can_edit_post($gone, 'anna@kvt.nl'), 'verwijderd bericht niet meer te bewerken');
+$first = fm_first_post_id($b);
+fm_delete_post($first, 'tfalken@kvt.nl');
+check(fm_get_thread($b) !== null && fm_get_post($first)['body'] === '', 'eerste bericht verwijderen laat de thread staan');
 
 // Taal.
 check_same('', fm_get_lang('anna@kvt.nl'), 'nog geen taal');

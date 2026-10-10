@@ -42,9 +42,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 if ($post === null || (int) $post['thread_id'] !== $threadId) {
                     throw new RuntimeException('forbidden');
                 }
-                if (fm_delete_post($postId, $fmUser)) {
-                    fm_redirect(fm_section_url($section));
-                }
+                fm_delete_post($postId, $fmUser);
                 fm_redirect(fm_thread_url($threadId, fm_page_of_post($threadId, $postId), $postId));
             }
         } catch (InvalidArgumentException) {
@@ -87,13 +85,26 @@ foreach ($posts as $post) {
     $postId = (int) $post['id'];
     $deleted = !empty($post['deleted_at']);
     $canEdit = fm_can_edit_post($post, $fmUser);
-    echo '<article class="post' . ($postId === $anchor ? ' first-unread' : '') . '" id="p' . $postId . '">'
+    $canDelete = fm_can_delete_post($post, $fmUser);
+    echo '<article class="post' . ($postId === $anchor ? ' first-unread' : '') . ($deleted ? ' is-deleted' : '') . '" id="p' . $postId . '">'
         . fm_poster_html((string) $post['author'])
         . '<div class="post-main"><header class="post-head">'
         . '<a class="post-link" href="' . h(fm_thread_url($threadId, $page, $postId)) . '" title="' . h(fm_t('link_post')) . '">post#' . $postId . '</a>'
         . '<time datetime="' . h(gmdate('c', (int) $post['created_at'])) . '">' . h(fm_format_time((int) $post['created_at'])) . '</time>'
-        . (!empty($post['edited_at']) ? '<span class="edited">' . h(fm_t('edited', fm_format_time((int) $post['edited_at']))) . '</span>' : '')
-        . '</header>';
+        . (!empty($post['edited_at']) && !$deleted ? '<span class="edited">' . h(fm_t('edited', fm_format_time((int) $post['edited_at']))) . '</span>' : '');
+    if (($canEdit && $editId !== $postId) || $canDelete) {
+        echo '<details class="post-menu"><summary title="' . h(fm_t('menu')) . '" aria-label="' . h(fm_t('menu')) . '">⋯</summary><div class="post-menu-list">';
+        if ($canEdit && $editId !== $postId) {
+            echo '<a href="' . h('thread.php?' . http_build_query(['id' => $threadId, 'p' => $page, 'edit' => $postId]) . '#p' . $postId) . '">' . h(fm_t('edit')) . '</a>';
+        }
+        if ($canDelete) {
+            echo '<form method="post" data-confirm="' . h(fm_t('confirm_delete')) . '">' . fm_csrf_field()
+                . '<input type="hidden" name="action" value="delete"><input type="hidden" name="post" value="' . $postId . '">'
+                . '<button type="submit" class="danger">' . h(fm_t('delete')) . '</button></form>';
+        }
+        echo '</div></details>';
+    }
+    echo '</header>';
     if ($deleted) {
         echo '<div class="post-body deleted">' . h(fm_t('deleted_post')) . '</div>';
     } elseif ($canEdit && $editId === $postId) {
@@ -105,15 +116,6 @@ foreach ($posts as $post) {
             . '<button type="submit" class="btn">' . h(fm_t('save')) . '</button></div></form>';
     } else {
         echo '<div class="post-body message-md">' . renderTicketMessageMarkdown((string) $post['body']) . '</div>';
-    }
-    if ($canEdit && $editId !== $postId) {
-        echo '<footer class="post-actions"><a href="' . h('thread.php?' . http_build_query(['id' => $threadId, 'p' => $page, 'edit' => $postId]) . '#p' . $postId) . '">' . h(fm_t('edit')) . '</a>';
-        if ($fmIsAdmin) {
-            echo '<form method="post" class="inline" data-confirm="' . h(fm_t($postId === $firstPostId ? 'confirm_delete_thread' : 'confirm_delete')) . '">' . fm_csrf_field()
-                . '<input type="hidden" name="action" value="delete"><input type="hidden" name="post" value="' . $postId . '">'
-                . '<button type="submit" class="link danger">' . h(fm_t('delete')) . '</button></form>';
-        }
-        echo '</footer>';
     }
     echo '</div></article>';
 }

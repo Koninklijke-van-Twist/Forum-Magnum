@@ -133,7 +133,11 @@ check(preg_match('/^thread\.php\?id=\d+&p=1#p\d+$/', location($hdr)) === 1, 'pos
 [$s, $body] = $U('GET', $threadUrl);
 check(str_contains($body, 'href="post.php?id=' . $firstPost . '">Nachricht #' . $firstPost), 'post-verwijzing gerenderd (DE)');
 check(!str_contains($body, 'data-first-unread'), 'alles gelezen: geen scroll-anker');
-check(!str_contains($body, '>Löschen<'), 'gebruiker kan niet verwijderen');
+preg_match_all('/<article class="post[^"]*" id="p(\d+)">.*?<\/article>/s', $body, $arts, PREG_SET_ORDER);
+check(count($arts) === 2, 'twee berichten');
+check(!str_contains($arts[0][0], 'post-menu'), 'geen menu op andermans bericht (gebruiker)');
+check(str_contains($arts[1][0], 'post-menu') && str_contains($arts[1][0], '>Bearbeiten<') && str_contains($arts[1][0], '>Löschen<'), 'eigen bericht: menu met bewerken + verwijderen');
+check(substr_count($body, 'edit=') === 1, 'geen losse bewerkknop buiten het menu');
 check(str_contains($body, 'edit='), 'gebruiker kan eigen bericht bewerken');
 
 // Admin: ongelezen-indicator, bewerken, verwijderen.
@@ -145,14 +149,24 @@ check(str_contains($body, 'class="badge"'), 'ongelezen-badge op sectie');
 check(str_contains($body, '>Verwijderen<'), 'admin ziet verwijderen');
 preg_match_all('/id="p(\d+)"/', $body, $m);
 $replyId = (int) end($m[1]);
+preg_match_all('/<article class="post[^"]*" id="p(\d+)">.*?<\/article>/s', $body, $arts, PREG_SET_ORDER);
+check(str_contains($arts[1][0], 'post-menu') && str_contains($arts[1][0], '>Verwijderen<') && !str_contains($arts[1][0], 'edit='), 'admin op andermans bericht: alleen verwijderen');
+check(str_contains($arts[0][0], '>Bewerken<') && str_contains($arts[0][0], '>Verwijderen<'), 'admin op eigen bericht: bewerken + verwijderen');
 [$s, $body] = $A('GET', 'thread.php?' . parse_url($threadUrl, PHP_URL_QUERY) . '&edit=' . $replyId);
-check(str_contains($body, 'name="action" value="edit"'), 'bewerkformulier');
+check(!str_contains($body, 'name="action" value="edit"'), 'admin krijgt geen bewerkformulier voor andermans bericht');
 [$s] = $A('POST', $threadUrl, ['action' => 'edit', 'csrf' => $acsrf, 'post' => $replyId, 'body' => 'gemodereerd']);
-check_same(303, $s, 'admin bewerkt');
+check_same(403, $s, 'admin kan andermans bericht niet bewerken');
+[$s, $body] = $U('GET', 'thread.php?' . parse_url($threadUrl, PHP_URL_QUERY) . '&edit=' . $replyId);
+check(str_contains($body, 'name="action" value="edit"'), 'eigen bewerkformulier');
+[$s] = $U('POST', $threadUrl, ['action' => 'edit', 'csrf' => $csrf, 'post' => $replyId, 'body' => 'aangepast door anna']);
+check_same(303, $s, 'gebruiker bewerkt eigen bericht');
+[$s] = $U('POST', $threadUrl, ['action' => 'edit', 'csrf' => $csrf, 'post' => $firstPost, 'body' => 'kaping']);
+check_same(403, $s, 'gebruiker kan andermans bericht niet bewerken');
 [$s] = $A('POST', $threadUrl, ['action' => 'delete', 'csrf' => $acsrf, 'post' => $replyId]);
 check_same(303, $s, 'admin verwijdert reactie');
 [$s, $body] = $A('GET', $threadUrl);
-check(str_contains($body, 'Bericht verwijderd door een beheerder.'), 'verwijderd bericht');
+check(str_contains($body, 'class="post is-deleted"') && str_contains($body, '>Bericht verwijderd<') && !str_contains($body, 'aangepast door anna'), 'verwijderd bericht leeg en gemarkeerd');
+check(substr_count($body, 'class="poster"') === 2, 'posterblok van verwijderd bericht blijft');
 [$s] = $U('POST', $threadUrl, ['action' => 'delete', 'csrf' => $csrf, 'post' => $firstPost]);
 check_same(403, $s, 'gebruiker kan niet verwijderen');
 
