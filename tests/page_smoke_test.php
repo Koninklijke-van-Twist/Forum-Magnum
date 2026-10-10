@@ -108,6 +108,8 @@ check(!str_contains($body, 'new.php?s=announcements') && str_contains($body, 'ne
 check_same('section.php?s=announcements', location($hdr), 'gebruiker: geen formulier, terug naar de lijst');
 [$s] = $U('POST', 'new.php?s=announcements', ['csrf' => $csrf, 'title' => 'x', 'body' => 'y']);
 check_same(403, $s, 'gebruiker kan geen aankondiging posten');
+[$s, , $hdr] = $A('POST', 'lang.php', ['lang' => 'nl', 'csrf' => $acsrf, 'back' => '/forum-magnum/new.php?s=announcements']);
+check_same('new.php?s=announcements', location($hdr), 'taalwissel op nieuwe-thread-pagina blijft daar');
 [$s, $body] = $A('GET', 'new.php?s=announcements');
 check(str_contains($body, 'id="new-thread"'), 'admin ziet nieuw-thread-formulier');
 [$s, , $hdr] = $A('POST', 'new.php?s=announcements', ['csrf' => $acsrf, 'title' => 'Welkom <b>', 'body' => "Hallo **allen** <script>alert(1)</script>\nZie #1185"]);
