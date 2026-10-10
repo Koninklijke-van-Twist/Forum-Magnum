@@ -76,9 +76,28 @@ function fm_section_url(string $section, int $page = 1, bool $keepOthers = true)
     return 'index.php' . ($query !== [] ? '?' . http_build_query($query) : '') . '#sec-' . $section;
 }
 
+/** Losse sectiepagina: alleen die lijst, FM_THREADS_PER_PAGE per pagina. */
+function fm_section_page_url(string $section, int $page = 1): string
+{
+    return 'section.php?' . http_build_query(['s' => $section] + ($page > 1 ? ['p' => $page] : []));
+}
+
 function fm_new_thread_url(string $section): string
 {
-    return 'section.php?' . http_build_query(['s' => $section]);
+    return 'new.php?' . http_build_query(['s' => $section]);
+}
+
+/** Kop + nieuwe-thread-knop + lijst + paginering van één sectie. */
+function fm_section_block_html(string $section, string $email, int $page, int $perPage, callable $pageUrl, string $tag): string
+{
+    $pages = fm_page_count(fm_count_threads($section), $perPage);
+    $page = max(1, min($pages, $page));
+
+    return '<div class="bar"><' . $tag . '><a class="section-link" href="' . h(fm_section_page_url($section)) . '">' . h(fm_section_label($section)) . '</a></' . $tag . '>'
+        . (fm_can_create_thread($section, $email) ? '<a class="btn" href="' . h(fm_new_thread_url($section)) . '">' . h(fm_t('new_thread')) . '</a>' : '')
+        . '</div>'
+        . fm_thread_list_html(fm_list_threads($section, $email, $page, $perPage))
+        . fm_pagination($page, $pages, $pageUrl);
 }
 
 /** Threadlijst (laatste bericht eerst) als HTML. */

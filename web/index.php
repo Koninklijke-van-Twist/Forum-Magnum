@@ -12,18 +12,13 @@ if ($fmLangChosen === '') {
     exit;
 }
 
-// De drie threadlijsten onder elkaar, elk met eigen paginering (?p_ann, ?p_work, ?p_gen).
+// De drie threadlijsten onder elkaar, elk met eigen paginering (?p_ann, ?p_work, ?p_gen)
+// en een eigen aantal per pagina; de sectiekop opent de losse sectiepagina.
 fm_header(fm_t('forum'));
 foreach (FM_SECTIONS as $section) {
-    $param = FM_SECTION_PAGE_PARAMS[$section];
-    $pages = fm_page_count(fm_count_threads($section), FM_THREADS_PER_PAGE);
-    $page = max(1, min($pages, (int) ($_GET[$param] ?? 1)));
+    $page = (int) ($_GET[FM_SECTION_PAGE_PARAMS[$section]] ?? 1);
     echo '<section class="home-section section-' . h($section) . '" id="sec-' . h($section) . '">'
-        . '<div class="bar"><h2>' . h(fm_section_label($section)) . '</h2>'
-        . (fm_can_create_thread($section, $fmUser) ? '<a class="btn" href="' . h(fm_new_thread_url($section)) . '">' . h(fm_t('new_thread')) . '</a>' : '')
-        . '</div>'
-        . fm_thread_list_html(fm_list_threads($section, $fmUser, $page))
-        . fm_pagination($page, $pages, static fn (int $n) => fm_section_url($section, $n))
+        . fm_section_block_html($section, $fmUser, $page, FM_HOME_PER_PAGE[$section], static fn (int $n) => fm_section_url($section, $n), 'h2')
         . '</section>';
 }
 fm_footer();

@@ -14,6 +14,8 @@ declare(strict_types=1);
 
 const FM_SECTIONS = ['announcements', 'work', 'general'];
 const FM_THREADS_PER_PAGE = 20;
+/** Threads per sectie op de startpagina; de losse sectiepagina toont er FM_THREADS_PER_PAGE. */
+const FM_HOME_PER_PAGE = ['announcements' => 5, 'work' => 10, 'general' => 10];
 const FM_POSTS_PER_PAGE = 50;
 /** Schemaversie in PRAGMA user_version; verhogen bij elke schemawijziging. */
 const FM_SCHEMA_VERSION = 1;

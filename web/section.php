@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-/** Nieuwe thread in een sectie. De lijsten zelf staan op de startpagina. */
+/** Losse sectiepagina (section.php?s=..&p=..): alleen die lijst, 20 per pagina. */
 require __DIR__ . '/lib/bootstrap.php';
 
 $section = (string) ($_GET['s'] ?? '');
@@ -13,48 +13,9 @@ if (!fm_is_section($section)) {
     fm_footer();
     exit;
 }
-if (isset($_GET['p'])) {
-    // Oude links (section.php?s=..&p=..) naar de juiste lijst op de startpagina.
-    fm_redirect(fm_section_url($section, (int) $_GET['p'], false));
-}
-$canCreate = fm_can_create_thread($section, $fmUser);
-if (!$canCreate) {
-    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
-        http_response_code(403);
-        fm_header(fm_t('err_forbidden'));
-        echo '<p class="flash error">' . h(fm_t('err_forbidden')) . '</p>';
-        fm_footer();
-        exit;
-    }
-    fm_redirect(fm_section_url($section, 1, false));
-}
-$error = '';
-$title = '';
-$body = '';
 
-if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
-    $title = (string) ($_POST['title'] ?? '');
-    $body = (string) ($_POST['body'] ?? '');
-    if (!fm_csrf_ok()) {
-        $error = fm_t('err_csrf');
-    } else {
-        try {
-            $threadId = fm_create_thread($section, $fmUser, $title, $body);
-            fm_redirect(fm_thread_url($threadId));
-        } catch (InvalidArgumentException) {
-            $error = fm_t('err_empty');
-        }
-    }
-}
-
-$back = fm_section_url($section, 1, false);
-fm_header(fm_t('new_thread'), [[fm_section_label($section), $back], [fm_t('new_thread'), null]]);
-echo '<div class="bar"><h1>' . h(fm_section_label($section)) . ' · ' . h(fm_t('new_thread')) . '</h1></div>';
-if ($error !== '') {
-    echo '<p class="flash error">' . h($error) . '</p>';
-}
-echo '<form method="post" id="new-thread" class="composer open">' . fm_csrf_field()
-    . '<input type="text" name="title" maxlength="150" required autofocus placeholder="' . h(fm_t('title')) . '" aria-label="' . h(fm_t('title')) . '" value="' . h($title) . '">'
-    . '<textarea name="body" rows="10" required placeholder="' . h(fm_t('message')) . '" aria-label="' . h(fm_t('message')) . '">' . h($body) . '</textarea>'
-    . '<div class="actions"><a class="btn ghost" href="' . h($back) . '">' . h(fm_t('cancel')) . '</a><button type="submit" class="btn">' . h(fm_t('post')) . '</button></div></form>';
+fm_header(fm_section_label($section), [[fm_section_label($section), null]]);
+echo '<section class="home-section section-' . h($section) . '" id="sec-' . h($section) . '">'
+    . fm_section_block_html($section, $fmUser, (int) ($_GET['p'] ?? 1), FM_THREADS_PER_PAGE, static fn (int $n) => fm_section_page_url($section, $n), 'h1')
+    . '</section>';
 fm_footer();

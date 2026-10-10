@@ -41,6 +41,8 @@ check_same('T24', fm_list_threads('work', 'anna@kvt.nl', 1)[0]['title'], 'meest 
 $workList = array_merge(fm_list_threads('work', 'anna@kvt.nl', 1), fm_list_threads('work', 'anna@kvt.nl', 2));
 check_same(1, fm_thread_list_page($workList[19]), 'thread 20 op pagina 1');
 check_same(2, fm_thread_list_page($workList[20]), 'thread 21 op pagina 2');
+check_same(['announcements' => 5, 'work' => 10, 'general' => 10], FM_HOME_PER_PAGE, 'startpagina: aankondigingen per 5, overige per 10');
+check_same(1, fm_thread_list_page($workList[0], 10), 'thread 1 op pagina 1 (10 per pagina)');
 
 // Thread met 120 berichten: 50 per pagina, chronologisch.
 $t = fm_create_thread('work', 'bob@kvt.nl', 'Lang', 'start', 20000);
