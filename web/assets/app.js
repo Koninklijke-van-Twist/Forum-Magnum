@@ -79,11 +79,11 @@ document.addEventListener('submit', function (e) {
 /* @-mentions: dropdown bij een losse @ in een tekstvak, en posterblok bij een klik op een mention. */
 (function () {
     'use strict';
-    var box = null, items = [], active = 0, field = null, start = -1, timer = null;
+    var box = null, items = [], active = 0, field = null, timer = null, seq = 0;
 
     function close() {
         if (box) { box.remove(); box = null; }
-        items = []; field = null; start = -1;
+        items = []; field = null;
     }
     function tokenAt(ta) {
         var upto = ta.value.slice(0, ta.selectionStart);
@@ -128,7 +128,10 @@ document.addEventListener('submit', function (e) {
     function pick(i) {
         var u = items[i];
         if (!u || !field) { return; }
-        var ta = field, before = ta.value.slice(0, start), after = ta.value.slice(ta.selectionStart);
+        var ta = field, t = tokenAt(ta);
+        if (!t) { close(); return; }
+        // Altijd het actuele token vervangen, nooit een oude startpositie.
+        var before = ta.value.slice(0, t.start), after = ta.value.slice(ta.selectionStart);
         var ins = '@' + u.id + ' ';
         ta.value = before + ins + after;
         ta.selectionStart = ta.selectionEnd = before.length + ins.length;
@@ -139,14 +142,18 @@ document.addEventListener('submit', function (e) {
         var ta = e.target;
         if (!ta.matches || !ta.matches('textarea[data-mentions]')) { return; }
         var t = tokenAt(ta);
-        if (!t) { close(); return; }
-        start = t.start;
+        var id = ++seq; // elk nieuw teken maakt lopende zoekopdrachten ongeldig
         clearTimeout(timer);
+        if (!t) { close(); return; }
         timer = setTimeout(function () {
             fetch('people.php?q=' + encodeURIComponent(t.q), { credentials: 'same-origin' })
                 .then(function (r) { return r.ok ? r.json() : []; })
-                .then(function (list) { if (document.activeElement === ta) { start = t.start; render(ta, list); } })
-                .catch(close);
+                .then(function (list) {
+                    var now = document.activeElement === ta ? tokenAt(ta) : null;
+                    if (id !== seq || !now || now.start !== t.start || now.q !== t.q) { if (id === seq) { close(); } return; }
+                    render(ta, list);
+                })
+                .catch(function () { if (id === seq) { close(); } });
         }, 120);
     });
     document.addEventListener('keydown', function (e) {
@@ -156,6 +163,7 @@ document.addEventListener('submit', function (e) {
             active = (active + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
             highlight();
         } else if (e.key === 'Enter' || e.key === 'Tab') {
+            if (!tokenAt(field)) { close(); return; } // geen @-token meer: gewone Enter/Tab
             e.preventDefault();
             e.stopImmediatePropagation();
             pick(active);

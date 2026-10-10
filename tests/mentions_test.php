@@ -53,6 +53,13 @@ $news = fm_list_thread_news('tfalken@kvt.nl');
 check_same([$a], array_map(fn ($r) => (int) $r['thread_id'], $news), 'alleen thread waar je gepost hebt');
 check_same(1, (int) $news[0]['unread'], 'aantal nieuw');
 check_same(1, fm_notification_counts('tfalken@kvt.nl')['threads'], 'telling berichten-tab');
+// Bugbot PR #8: oudere ongelezen thread valt niet weg achter recentere gelezen threads.
+for ($i = 0; $i < 3; $i++) {
+    fm_create_thread('general', 'tfalken@kvt.nl', 'Recent ' . $i, 'x', 2400 + $i); // eigen = gelezen
+}
+check_same([$a], array_map(fn ($r) => (int) $r['thread_id'], fm_list_thread_news('tfalken@kvt.nl', 2)), 'ongelezen-filter vóór LIMIT');
+fm_reply($a, 'tfalken@kvt.nl', 'eigen reactie', 2500);
+check_same(0, fm_notification_counts('tfalken@kvt.nl')['threads'], 'eigen reactie markeert gelezen, telt niet mee');
 
 // Weergave.
 $GLOBALS['fmUser'] = 'tfalken@kvt.nl';

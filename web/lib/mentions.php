@@ -146,18 +146,32 @@ function fm_list_mentions(string $email, int $limit = 50): array
     return $st->fetchAll();
 }
 
-/** Threads waar $email gepost heeft en waar nieuwe berichten (van anderen) staan. */
+/**
+ * Threads waar $email gepost heeft en waar ongelezen berichten van anderen staan.
+ * Het ongelezen-filter zit in SQL vóór de LIMIT, zodat oudere threads niet wegvallen.
+ */
+const FM_THREAD_NEWS_FROM = 'FROM threads t LEFT JOIN reads r ON r.thread_id = t.id AND r.email = :me
+    JOIN (SELECT n.thread_id, COUNT(*) AS unread FROM posts n
+          LEFT JOIN reads nr ON nr.thread_id = n.thread_id AND nr.email = :me
+          WHERE n.deleted_at IS NULL AND n.author <> :me AND n.id > COALESCE(nr.last_read_post_id, 0)
+          GROUP BY n.thread_id) u ON u.thread_id = t.id
+    WHERE EXISTS (SELECT 1 FROM posts mine WHERE mine.thread_id = t.id AND mine.author = :me)';
+
 function fm_list_thread_news(string $email, int $limit = 50): array
 {
-    $email = strtolower($email);
-    $st = fm_db()->prepare('SELECT t.id AS thread_id, t.title, t.last_post_at,
-            (SELECT COUNT(*) FROM posts n WHERE n.thread_id = t.id AND n.deleted_at IS NULL AND n.id > COALESCE(r.last_read_post_id, 0)) AS unread
-        FROM threads t LEFT JOIN reads r ON r.thread_id = t.id AND r.email = ?
-        WHERE EXISTS (SELECT 1 FROM posts mine WHERE mine.thread_id = t.id AND mine.author = ?)
-        ORDER BY t.last_post_at DESC LIMIT ' . max(1, $limit));
-    $st->execute([$email, $email]);
+    $st = fm_db()->prepare('SELECT t.id AS thread_id, t.title, t.last_post_at, u.unread ' . FM_THREAD_NEWS_FROM
+        . ' ORDER BY t.last_post_at DESC, t.id DESC LIMIT ' . max(1, $limit));
+    $st->execute([':me' => strtolower($email)]);
 
-    return array_values(array_filter($st->fetchAll(), static fn ($r) => (int) $r['unread'] > 0));
+    return $st->fetchAll();
+}
+
+function fm_count_thread_news(string $email): int
+{
+    $st = fm_db()->prepare('SELECT COUNT(*) ' . FM_THREAD_NEWS_FROM);
+    $st->execute([':me' => strtolower($email)]);
+
+    return (int) $st->fetchColumn();
 }
 
 /** @return array{mentions:int,threads:int} */
@@ -168,5 +182,5 @@ function fm_notification_counts(string $email): array
         WHERE m.email = ? AND p.deleted_at IS NULL AND p.id > COALESCE(r.last_read_post_id, 0)');
     $st->execute([strtolower($email)]);
 
-    return ['mentions' => (int) $st->fetchColumn(), 'threads' => count(fm_list_thread_news($email))];
+    return ['mentions' => (int) $st->fetchColumn(), 'threads' => fm_count_thread_news($email)];
 }
