@@ -157,3 +157,30 @@ form.inline { display: inline; }
 .file-input { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; font-size: .85rem; color: var(--muted); cursor: pointer; max-width: 70%; }
 .file-input input { font-size: .82rem; max-width: 100%; }
 .attachment-removes { display: flex; flex-direction: column; gap: 2px; font-size: .88rem; }
+
+/* Mentions */
+.mention { display: inline; border: 0; padding: 0 2px; margin: 0; background: none; font: inherit; font-weight: 600; color: #1a6fd6; cursor: pointer; border-radius: 4px; }
+.mention:hover { background: #e7f0fc; }
+.mention-self { color: #d4620a; background: #fff6d6; box-shadow: 0 0 6px 1px rgba(255, 204, 0, .75); }
+.mention-self:hover { background: #ffeeb0; }
+.mention-box { position: absolute; z-index: 50; list-style: none; margin: 0; padding: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.15); max-width: 320px; }
+.mention-box li { display: flex; flex-direction: column; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
+.mention-box li span { font-size: .8rem; color: var(--muted); }
+.mention-box li.active, .mention-box li:hover { background: var(--bg); }
+.mention-pop { position: absolute; z-index: 60; width: 220px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+.mention-pop .poster { border-radius: 10px; display: flex; flex-direction: column; }
+.mention-pop .poster-avatar { width: 100%; height: auto; }
+.mention-pop .poster-mail { display: block; }
+
+/* Meldingen */
+.bell { position: relative; font-size: 1.15rem; line-height: 1; text-decoration: none; }
+.bell-count { position: absolute; top: -6px; right: -9px; background: #d93025; color: #fff; border-radius: 999px; font-size: .68rem; font-weight: 700; padding: 1px 5px; }
+.bell.has-mentions .bell-count { background: #f5a300; color: #1d2733; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+.tabs a { padding: 8px 14px; text-decoration: none; color: var(--muted); border-bottom: 3px solid transparent; }
+.tabs a.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* Ongelezen: gekleurde threadtitel, andere omlijning bij berichten */
+.thread.is-unread .thread-title { color: var(--accent); }
+.post.is-unread { border-color: #6ea8ec; box-shadow: 0 0 0 1px #6ea8ec; }
+.post.first-unread { box-shadow: 0 0 0 2px #1f5fa8; }

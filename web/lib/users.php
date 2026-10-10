@@ -187,6 +187,16 @@ function fm_session_name_for(string $email): string
     if (is_array($session) && strtolower((string) ($session['email'] ?? '')) === $email && trim((string) ($session['name'] ?? '')) !== '') {
         return trim((string) $session['name']);
     }
+    // Naam uit de login van een eerder bezoek (known_users, zie mentions.php).
+    try {
+        $st = fm_db()->prepare('SELECT name FROM known_users WHERE email = ?');
+        $st->execute([$email]);
+        $known = trim((string) $st->fetchColumn());
+        if ($known !== '') {
+            return $known;
+        }
+    } catch (Throwable) {
+    }
 
     return fm_name_from_email($email);
 }

@@ -11,6 +11,7 @@ require_once __DIR__ . '/i18n.php';
 require_once __DIR__ . '/store.php';
 require_once __DIR__ . '/attachments.php';
 require_once __DIR__ . '/users.php';
+require_once __DIR__ . '/mentions.php';
 require_once __DIR__ . '/markdown.php';
 require_once __DIR__ . '/layout.php';
 
@@ -33,6 +34,7 @@ if ($fmUser === '' || !filter_var($fmUser, FILTER_VALIDATE_EMAIL)) {
     exit;
 }
 $fmIsAdmin = fm_is_admin($fmUser);
+fm_touch_user($fmUser, (string) ($_SESSION['user']['name'] ?? ''));
 $fmLangChosen = fm_get_lang($fmUser);
 $GLOBALS['fmLang'] = $fmLangChosen !== '' ? $fmLangChosen : 'nl';
 

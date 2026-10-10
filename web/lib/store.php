@@ -19,7 +19,7 @@ const FM_THREADS_PER_PAGE = 20;
 const FM_HOME_PER_PAGE = ['announcements' => 5, 'work' => 10, 'general' => 10];
 const FM_POSTS_PER_PAGE = 50;
 /** Schemaversie in PRAGMA user_version; verhogen bij elke schemawijziging. */
-const FM_SCHEMA_VERSION = 2;
+const FM_SCHEMA_VERSION = 3;
 
 function fm_data_dir(): string
 {
@@ -128,6 +128,27 @@ function fm_migrate(PDO $pdo): void
             )');
             $pdo->exec('CREATE INDEX IF NOT EXISTS idx_attachments_post ON post_attachments(post_id, id)');
             $pdo->exec('CREATE INDEX IF NOT EXISTS idx_attachments_hash ON post_attachments(hash)');
+        }
+        if ($version < 3) {
+            // Bekende gebruikers (voor @-mentions) en vermeldingen per bericht.
+            $pdo->exec('CREATE TABLE IF NOT EXISTS known_users (
+                email TEXT PRIMARY KEY,
+                mention_id TEXT NOT NULL,
+                name TEXT NOT NULL DEFAULT \'\',
+                last_seen INTEGER NOT NULL DEFAULT 0
+            )');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_known_users_mention ON known_users(mention_id)');
+            $pdo->exec('CREATE TABLE IF NOT EXISTS mentions (
+                post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+                email TEXT NOT NULL,
+                PRIMARY KEY (post_id, email)
+            )');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_mentions_email ON mentions(email, post_id)');
+            // Bestaande auteurs alvast bekend maken.
+            foreach ($pdo->query('SELECT DISTINCT author FROM posts')->fetchAll(PDO::FETCH_COLUMN) as $author) {
+                $pdo->prepare('INSERT OR IGNORE INTO known_users (email, mention_id) VALUES (?, ?)')
+                    ->execute([(string) $author, fm_mention_id((string) $author)]);
+            }
         }
         $pdo->exec('PRAGMA user_version = ' . FM_SCHEMA_VERSION);
         $pdo->exec('COMMIT');
@@ -273,6 +294,7 @@ function fm_insert_post(PDO $pdo, int $threadId, string $email, string $body, in
     $pdo->prepare('INSERT INTO posts (thread_id, author, body, created_at) VALUES (?,?,?,?)')
         ->execute([$threadId, $email, $body, $now]);
     $postId = (int) $pdo->lastInsertId();
+    fm_sync_mentions($pdo, $postId, $body, $email);
     $pdo->prepare('UPDATE threads SET last_post_at = ?, last_post_id = ?, last_author = ?, post_count = post_count + 1 WHERE id = ?')
         ->execute([$now, $postId, $email, $threadId]);
     fm_mark_read($threadId, $email, $postId);
@@ -323,6 +345,7 @@ function fm_edit_post(int $postId, string $email, string $body, ?string $title =
         }
         $pdo->prepare('UPDATE posts SET body = ?, edited_at = ?, edited_by = ? WHERE id = ?')
             ->execute([$body, $now, strtolower($email), $postId]);
+        fm_sync_mentions($pdo, $postId, $body, (string) $post['author']);
         fm_attach_files($pdo, $postId, $files, $now);
         if ($title !== null && fm_first_post_id((int) $post['thread_id']) === $postId) {
             $title = fm_clean_text(str_replace("\n", ' ', $title), 150);
@@ -354,6 +377,7 @@ function fm_delete_post(int $postId, string $email): void
         $pdo->prepare("UPDATE posts SET body = '', deleted_at = ?, deleted_by = ? WHERE id = ?")->execute([time(), strtolower($email), $postId]);
         // Koppelingen weg; het bestand alleen als niemand er nog naar verwijst.
         fm_detach_files($pdo, $postId);
+        $pdo->prepare('DELETE FROM mentions WHERE post_id = ?')->execute([$postId]);
         fm_refresh_thread_meta((int) $post['thread_id']);
     });
 }

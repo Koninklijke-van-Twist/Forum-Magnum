@@ -18,6 +18,11 @@ het logo (`web/thumbnail.png`) is gebleven.
   sectiepagina (`section.php?s=<sectie>&p=<n>`, alleen die lijst, 20 per pagina). Een nieuwe
   thread maak je op `new.php?s=<sectie>`; de terug-link in een thread wijst naar de
   sectiepagina waarop die thread staat.
+- Vermeldingen: `@` in een tekstvak opent een lijst met collega's (iedereen die ooit is
+  ingelogd), die `@gebruiker:domein` invoegt (bv. `@tfalken:kvt` voor tfalken@kvt.nl). In een
+  bericht staat de voornaam; klikken toont het posterblok. Je eigen vermeldingen zijn gemarkeerd.
+- Notificaties (bel rechtsboven): tabbladen *Vermeldingen* en *Berichten* (nieuwe berichten
+  in threads waarin je hebt gepost). Ongelezen threads en berichten hebben een eigen kleur of rand.
 - Threadlijsten: laatste bericht eerst, ongelezen-indicator.
   Binnen een thread: oudste bovenaan, 50 per pagina. Een thread opent op de pagina met
   je eerste ongelezen bericht (en scrolt ernaartoe), anders op de laatste pagina.

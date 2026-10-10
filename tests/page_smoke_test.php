@@ -264,6 +264,33 @@ $U('POST', $attThread, ['action' => 'delete', 'csrf' => $csrf, 'post' => (int) $
 check_same(404, $U('GET', 'file.php?id=' . $ids[0])[0], 'bijlage van verwijderd bericht weg');
 check_same(1, count(glob($data . '/files/*/*/*') ?: []), 'gedeeld bestand blijft (reactie admin)');
 
+// Mentions, meldingen en ongelezen-kleuring.
+[$s, $body] = $U('GET', 'people.php?q=tfal');
+$json = json_decode($body, true);
+check_same(200, $s, 'people.php laadt');
+check(is_array($json) && in_array('tfalken:kvt', array_column($json, 'id'), true) && !isset($json[0]['email']), 'dropdown-suggesties (zonder e-mail)');
+[$s, $body] = $U('GET', 'people.php?poster=tfalken%40kvt.nl');
+check(str_contains($body, 'class="poster"') && str_contains($body, 'admin-badge.svg'), 'posterblok bij klik op mention');
+[$s, , $hdr] = $U('POST', 'new.php?s=general', ['csrf' => $csrf, 'title' => 'Vraag voor Tim', 'body' => 'Hoi @tfalken:kvt']);
+$mentionThread = location($hdr);
+[$s, $body] = $A('GET', 'index.php');
+check(preg_match('/class="bell has-mentions"[^>]*>🔔<span class="bell-count">\d+<\/span>/u', $body) === 1, 'bel met telling en vermelding');
+[$s, $body] = $A('GET', 'notifications.php');
+check(str_contains($body, 'Vermeldingen') && str_contains($body, 'Berichten') && str_contains($body, 'noemde je in Vraag voor Tim'), 'tab vermeldingen');
+$U('POST', $threadUrl, ['action' => 'reply', 'csrf' => $csrf, 'body' => 'Nog een vraag']);
+[$s, $body] = $A('GET', 'notifications.php?tab=posts');
+check(str_contains($body, 'Nieuwe berichten in Welkom &lt;b&gt;'), 'tab berichten: thread waar je gepost hebt');
+[$s, $body] = $A('GET', 'index.php');
+check(str_contains($sectionHtml($body, 'general'), '<li class="thread is-unread"><a class="thread-title" href="thread.php?id='), 'ongelezen thread gemarkeerd');
+[$s, $body] = $A('GET', $mentionThread);
+check(str_contains($body, 'class="post first-unread is-unread"'), 'ongelezen bericht: andere omlijning');
+check(str_contains($body, 'class="mention mention-self"'), 'eigen naam gemarkeerd in bericht');
+check(str_contains($body, 'data-mentions'), 'tekstvak met @-dropdown');
+[$s, $body] = $A('GET', $mentionThread);
+check(!str_contains($body, 'is-unread'), 'na lezen geen ongelezen-omlijning');
+[$s, $body] = $A('GET', 'notifications.php?tab=mentions');
+check(!str_contains($body, 'class="thread is-unread"'), 'vermelding gelezen');
+
 foreach (['assets/app.css', 'assets/app.js', 'assets/admin-badge.svg', 'assets/flags/nl.svg', 'assets/flags/fr.svg', 'assets/flags/de.svg', 'assets/flags/en.svg', 'thumbnail.png'] as $asset) {
     check_same(200, $U('GET', $asset)[0], "$asset bereikbaar");
 }
