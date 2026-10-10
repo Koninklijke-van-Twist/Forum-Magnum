@@ -1,0 +1,203 @@
+<?php
+
+declare(strict_types=1);
+
+/** Talen: code => [naam, html-lang]. Vlaggen staan in assets/flags/<code>.svg. */
+const FM_LANGUAGES = [
+    'nl' => ['Nederlands', 'nl'],
+    'fr' => ['Français', 'fr'],
+    'de' => ['Deutsch', 'de'],
+    'en' => ['English (UK)', 'en-GB'],
+];
+
+function fm_strings(): array
+{
+    return [
+        'nl' => [
+            'sec_announcements' => 'Aankondigingen',
+            'sec_work' => 'Werkgerelateerd',
+            'sec_general' => 'Algemeen',
+            'new_thread' => 'Nieuwe thread',
+            'title' => 'Titel',
+            'message' => 'Bericht',
+            'post' => 'Plaatsen',
+            'reply' => 'Reageren',
+            'save' => 'Opslaan',
+            'cancel' => 'Annuleren',
+            'edit' => 'Bewerken',
+            'delete' => 'Verwijderen',
+            'confirm_delete' => 'Dit bericht verwijderen?',
+            'edited' => 'bewerkt %s',
+            'deleted_post' => 'Bericht verwijderd',
+            'menu' => 'Opties',
+            'threads' => 'Threads',
+            'replies' => 'Reacties',
+            'last_post' => 'Laatste bericht',
+            'unread' => '%d nieuw',
+            'no_threads' => 'Nog geen threads.',
+            'prev' => 'Vorige',
+            'next' => 'Volgende',
+            'page' => 'Pagina %d van %d',
+            'language' => 'Taal',
+            'admin' => 'Beheerder',
+            'ticket_ref' => 'Ticket #%d',
+            'post_ref' => 'Bericht #%d',
+            'err_csrf' => 'Sessie verlopen. Probeer het opnieuw.',
+            'err_empty' => 'Vul alle velden in.',
+            'err_forbidden' => 'Dat mag je hier niet.',
+            'not_found' => 'Niet gevonden.',
+            'forum' => 'Forum',
+            'link_post' => 'Link naar dit bericht',
+            'today' => 'vandaag %s',
+            'yesterday' => 'gisteren %s',
+        ],
+        'fr' => [
+            'sec_announcements' => 'Annonces',
+            'sec_work' => 'Travail',
+            'sec_general' => 'Général',
+            'new_thread' => 'Nouveau sujet',
+            'title' => 'Titre',
+            'message' => 'Message',
+            'post' => 'Publier',
+            'reply' => 'Répondre',
+            'save' => 'Enregistrer',
+            'cancel' => 'Annuler',
+            'edit' => 'Modifier',
+            'delete' => 'Supprimer',
+            'confirm_delete' => 'Supprimer ce message ?',
+            'edited' => 'modifié %s',
+            'deleted_post' => 'Message supprimé',
+            'menu' => 'Options',
+            'threads' => 'Sujets',
+            'replies' => 'Réponses',
+            'last_post' => 'Dernier message',
+            'unread' => '%d nouveau(x)',
+            'no_threads' => 'Aucun sujet pour l’instant.',
+            'prev' => 'Précédent',
+            'next' => 'Suivant',
+            'page' => 'Page %d sur %d',
+            'language' => 'Langue',
+            'admin' => 'Administrateur',
+            'ticket_ref' => 'Ticket n° %d',
+            'post_ref' => 'Message n° %d',
+            'err_csrf' => 'Session expirée. Veuillez réessayer.',
+            'err_empty' => 'Veuillez remplir tous les champs.',
+            'err_forbidden' => 'Action non autorisée ici.',
+            'not_found' => 'Introuvable.',
+            'forum' => 'Forum',
+            'link_post' => 'Lien vers ce message',
+            'today' => 'aujourd’hui %s',
+            'yesterday' => 'hier %s',
+        ],
+        'de' => [
+            'sec_announcements' => 'Ankündigungen',
+            'sec_work' => 'Arbeit',
+            'sec_general' => 'Allgemeines',
+            'new_thread' => 'Neues Thema',
+            'title' => 'Titel',
+            'message' => 'Nachricht',
+            'post' => 'Veröffentlichen',
+            'reply' => 'Antworten',
+            'save' => 'Speichern',
+            'cancel' => 'Abbrechen',
+            'edit' => 'Bearbeiten',
+            'delete' => 'Löschen',
+            'confirm_delete' => 'Diese Nachricht löschen?',
+            'edited' => 'bearbeitet %s',
+            'deleted_post' => 'Nachricht gelöscht',
+            'menu' => 'Optionen',
+            'threads' => 'Themen',
+            'replies' => 'Antworten',
+            'last_post' => 'Letzte Nachricht',
+            'unread' => '%d neu',
+            'no_threads' => 'Noch keine Themen.',
+            'prev' => 'Zurück',
+            'next' => 'Weiter',
+            'page' => 'Seite %d von %d',
+            'language' => 'Sprache',
+            'admin' => 'Administrator',
+            'ticket_ref' => 'Ticket #%d',
+            'post_ref' => 'Nachricht #%d',
+            'err_csrf' => 'Sitzung abgelaufen. Bitte erneut versuchen.',
+            'err_empty' => 'Bitte alle Felder ausfüllen.',
+            'err_forbidden' => 'Das ist hier nicht erlaubt.',
+            'not_found' => 'Nicht gefunden.',
+            'forum' => 'Forum',
+            'link_post' => 'Link zu dieser Nachricht',
+            'today' => 'heute %s',
+            'yesterday' => 'gestern %s',
+        ],
+        'en' => [
+            'sec_announcements' => 'Announcements',
+            'sec_work' => 'Work-related',
+            'sec_general' => 'General',
+            'new_thread' => 'New thread',
+            'title' => 'Title',
+            'message' => 'Message',
+            'post' => 'Post',
+            'reply' => 'Reply',
+            'save' => 'Save',
+            'cancel' => 'Cancel',
+            'edit' => 'Edit',
+            'delete' => 'Delete',
+            'confirm_delete' => 'Delete this message?',
+            'edited' => 'edited %s',
+            'deleted_post' => 'Message deleted',
+            'menu' => 'Options',
+            'threads' => 'Threads',
+            'replies' => 'Replies',
+            'last_post' => 'Last post',
+            'unread' => '%d new',
+            'no_threads' => 'No threads yet.',
+            'prev' => 'Previous',
+            'next' => 'Next',
+            'page' => 'Page %d of %d',
+            'language' => 'Language',
+            'admin' => 'Administrator',
+            'ticket_ref' => 'Ticket #%d',
+            'post_ref' => 'Message #%d',
+            'err_csrf' => 'Session expired. Please try again.',
+            'err_empty' => 'Please fill in all fields.',
+            'err_forbidden' => 'That is not allowed here.',
+            'not_found' => 'Not found.',
+            'forum' => 'Forum',
+            'link_post' => 'Link to this message',
+            'today' => 'today %s',
+            'yesterday' => 'yesterday %s',
+        ],
+    ];
+}
+
+function fm_lang(): string
+{
+    $lang = (string) ($GLOBALS['fmLang'] ?? 'nl');
+
+    return array_key_exists($lang, FM_LANGUAGES) ? $lang : 'nl';
+}
+
+function fm_t(string $key, mixed ...$args): string
+{
+    static $strings = null;
+    $strings ??= fm_strings();
+    $text = $strings[fm_lang()][$key] ?? $strings['nl'][$key] ?? $key;
+
+    return $args === [] ? $text : vsprintf($text, $args);
+}
+
+function fm_format_time(int $ts): string
+{
+    if ($ts <= 0) {
+        return '';
+    }
+    $tz = new DateTimeZone('Europe/Amsterdam');
+    $at = (new DateTimeImmutable('@' . $ts))->setTimezone($tz);
+    $today = new DateTimeImmutable('today', $tz);
+    if ($at >= $today) {
+        return fm_t('today', $at->format('H:i'));
+    }
+    if ($at >= $today->modify('-1 day')) {
+        return fm_t('yesterday', $at->format('H:i'));
+    }
+
+    return $at->format('d-m-Y H:i');
+}
