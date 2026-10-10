@@ -74,7 +74,8 @@ if ($posts !== []) {
 }
 
 $pagerUrl = static fn (int $n) => fm_thread_url($threadId, $n);
-fm_header((string) $thread['title'], [[fm_section_label($section), fm_section_url($section)], [(string) $thread['title'], null]]);
+$backUrl = fm_section_url($section, fm_thread_list_page(fm_get_thread($threadId) ?? $thread), false);
+fm_header((string) $thread['title'], [[fm_section_label($section), $backUrl], [(string) $thread['title'], null]]);
 echo '<div class="bar"><h1>' . h((string) $thread['title']) . '</h1></div>';
 if ($error !== '') {
     echo '<p class="flash error">' . h($error) . '</p>';

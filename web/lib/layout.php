@@ -42,9 +42,64 @@ function fm_flash(?string $message = null): ?string
     return is_string($m) ? $m : null;
 }
 
-function fm_section_url(string $section, int $page = 1): string
+/** Paginaparameter per sectie op de startpagina (onafhankelijk van elkaar). */
+const FM_SECTION_PAGE_PARAMS = ['announcements' => 'p_ann', 'work' => 'p_work', 'general' => 'p_gen'];
+
+/** Huidige pagina's van de startpagina uit $_GET (alleen > 1). @return array<string,int> */
+function fm_home_pages(): array
 {
-    return 'section.php?' . http_build_query(['s' => $section] + ($page > 1 ? ['p' => $page] : []));
+    $pages = [];
+    foreach (FM_SECTION_PAGE_PARAMS as $param) {
+        $n = (int) ($_GET[$param] ?? 1);
+        if ($n > 1) {
+            $pages[$param] = $n;
+        }
+    }
+
+    return $pages;
+}
+
+/**
+ * Startpagina met $section op $page; de pagina's van de andere secties blijven staan
+ * ($keepOthers) zodat bladeren in de ene lijst de andere niet terugzet.
+ */
+function fm_section_url(string $section, int $page = 1, bool $keepOthers = true): string
+{
+    $query = $keepOthers ? fm_home_pages() : [];
+    $param = FM_SECTION_PAGE_PARAMS[$section] ?? 'p_gen';
+    unset($query[$param]);
+    if ($page > 1) {
+        $query[$param] = $page;
+    }
+    ksort($query);
+
+    return 'index.php' . ($query !== [] ? '?' . http_build_query($query) : '') . '#sec-' . $section;
+}
+
+function fm_new_thread_url(string $section): string
+{
+    return 'section.php?' . http_build_query(['s' => $section]);
+}
+
+/** Threadlijst (laatste bericht eerst) als HTML. */
+function fm_thread_list_html(array $threads): string
+{
+    if ($threads === []) {
+        return '<p class="empty">' . h(fm_t('no_threads')) . '</p>';
+    }
+    $html = '<ol class="threads">';
+    foreach ($threads as $t) {
+        $unread = (int) $t['unread'];
+        $last = fm_user_info((string) $t['last_author'], false);
+        $html .= '<li class="thread' . ($unread > 0 ? ' is-unread' : '') . '">'
+            . '<a class="thread-title" href="' . h(fm_thread_url((int) $t['id'])) . '">' . h((string) $t['title']) . '</a>'
+            . ($unread > 0 ? '<span class="badge">' . h(fm_t('unread', $unread)) . '</span>' : '')
+            . '<span class="meta"><span title="' . h(fm_t('replies')) . '">💬 ' . max(0, (int) $t['post_count'] - 1) . '</span>'
+            . ' · <a href="' . h('post.php?id=' . (int) $t['last_post_id']) . '" title="' . h(fm_t('last_post')) . '">' . h($last['name']) . ', ' . h(fm_format_time((int) $t['last_post_at'])) . '</a></span>'
+            . '</li>';
+    }
+
+    return $html . '</ol>';
 }
 
 function fm_thread_url(int $threadId, ?int $page = null, int $anchorPost = 0): string

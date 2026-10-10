@@ -373,6 +373,18 @@ function fm_section_summary(string $email): array
     return $out;
 }
 
+/** Op welke pagina van de sectielijst staat deze thread (zelfde sortering als fm_list_threads). */
+function fm_thread_list_page(array $thread, int $perPage = FM_THREADS_PER_PAGE): int
+{
+    $st = fm_db()->prepare('SELECT COUNT(*) FROM threads WHERE section = ? AND (
+            last_post_at > ? OR (last_post_at = ? AND last_post_id > ?) OR (last_post_at = ? AND last_post_id = ? AND id > ?))');
+    $at = (int) $thread['last_post_at'];
+    $lp = (int) $thread['last_post_id'];
+    $st->execute([(string) $thread['section'], $at, $at, $lp, $at, $lp, (int) $thread['id']]);
+
+    return intdiv((int) $st->fetchColumn(), $perPage) + 1;
+}
+
 function fm_count_posts(int $threadId): int
 {
     $st = fm_db()->prepare('SELECT COUNT(*) FROM posts WHERE thread_id = ?');

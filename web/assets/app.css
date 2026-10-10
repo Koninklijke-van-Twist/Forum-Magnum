@@ -137,3 +137,11 @@ form.inline { display: inline; }
 }
 .post.is-deleted .post-main { background: #fdecec; }
 .post-body.deleted { color: #8a1c1c; font-style: italic; }
+
+/* Startpagina: drie threadlijsten onder elkaar */
+.home-section { margin-bottom: 26px; scroll-margin-top: 60px; }
+.home-section h2 { font-size: 1.2rem; margin: 0; padding-left: 10px; border-left: 5px solid var(--accent); }
+.section-announcements h2 { border-left-color: #c77700; }
+.section-work h2 { border-left-color: #1f5fa8; }
+.section-general h2 { border-left-color: #2e7d4f; }
+.home-section .pager { margin-bottom: 0; }

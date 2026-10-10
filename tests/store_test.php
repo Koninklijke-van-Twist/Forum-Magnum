@@ -38,6 +38,10 @@ check_same(20, count(fm_list_threads('work', 'anna@kvt.nl', 1)), '20 per pagina'
 check_same(5, count(fm_list_threads('work', 'anna@kvt.nl', 2)), 'rest op pagina 2');
 check_same('T24', fm_list_threads('work', 'anna@kvt.nl', 1)[0]['title'], 'meest recent bovenaan');
 
+$workList = array_merge(fm_list_threads('work', 'anna@kvt.nl', 1), fm_list_threads('work', 'anna@kvt.nl', 2));
+check_same(1, fm_thread_list_page($workList[19]), 'thread 20 op pagina 1');
+check_same(2, fm_thread_list_page($workList[20]), 'thread 21 op pagina 2');
+
 // Thread met 120 berichten: 50 per pagina, chronologisch.
 $t = fm_create_thread('work', 'bob@kvt.nl', 'Lang', 'start', 20000);
 $ids = [fm_first_post_id($t)];
