@@ -29,3 +29,28 @@
         if (target) { target.scrollIntoView({ block: 'start' }); }
     });
 })();
+
+/* Taalwissel: niet-verstuurde invoer (titel/tekst) bewaren en na het herladen terugzetten. */
+(function () {
+    'use strict';
+    var key = 'fm-draft:' + location.pathname + location.search;
+    var fields = function () {
+        return Array.prototype.slice.call(document.querySelectorAll('form:not([action="lang.php"]) input[name="title"], form:not([action="lang.php"]) textarea[name="body"]'));
+    };
+    document.addEventListener('submit', function (e) {
+        if (e.target.getAttribute('action') !== 'lang.php') { return; }
+        var draft = fields().map(function (f) { return f.value; });
+        try { sessionStorage.setItem(key, JSON.stringify(draft)); } catch (err) { /* geen opslag beschikbaar */ }
+    });
+    var saved = null;
+    try { saved = sessionStorage.getItem(key); sessionStorage.removeItem(key); } catch (err) { return; }
+    if (!saved) { return; }
+    var draft = JSON.parse(saved);
+    fields().forEach(function (f, i) {
+        if (typeof draft[i] === 'string' && draft[i] !== '') {
+            f.value = draft[i];
+            var form = f.closest('.composer');
+            if (form) { form.classList.add('open'); }
+        }
+    });
+}());
