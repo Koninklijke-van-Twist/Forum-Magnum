@@ -148,7 +148,11 @@ function fm_header(string $title, array $crumbs = []): void
     foreach ($crumbs as [$label, $url]) {
         echo '<span class="sep">›</span>' . ($url !== null ? '<a href="' . h($url) . '">' . h($label) . '</a>' : '<span>' . h($label) . '</span>');
     }
+    $counts = fm_notification_counts($fmUser);
+    $total = $counts['mentions'] + $counts['threads'];
     echo '</nav><div class="me">'
+        . '<a class="bell' . ($counts['mentions'] > 0 ? ' has-mentions' : '') . '" href="notifications.php" title="' . h(fm_t('notifications')) . '" aria-label="' . h(fm_t('notifications')) . '">🔔'
+        . ($total > 0 ? '<span class="bell-count">' . $total . '</span>' : '') . '</a>'
         . '<details class="lang-menu"><summary title="' . h(fm_t('language')) . '"><img class="flag" src="assets/flags/' . h($lang) . '.svg" alt="' . h(FM_LANGUAGES[$lang][0]) . '"></summary>'
         . fm_language_form('lang-list') . '</details>'
         . '<img class="me-avatar" src="' . h(fm_avatar_url($fmUser)) . '" alt="" title="' . h($me['name']) . '" width="32" height="32">'

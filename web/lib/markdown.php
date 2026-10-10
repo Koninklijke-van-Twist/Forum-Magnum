@@ -491,6 +491,17 @@ function renderMessageInlineHtml(string $text, bool $forEmail = false): string
         $work
     ) ?? $work;
 
+    // Forum 1b-2. @-mentions (@tfalken:kvt) van bekende gebruikers.
+    $work = preg_replace_callback(
+        FM_MENTION_PATTERN,
+        static function (array $match) use ($store): string {
+            $html = function_exists('fm_mention_html') ? fm_mention_html($match[1] . ':' . $match[2]) : null;
+
+            return $html === null ? (string) $match[0] : $store($html);
+        },
+        $work
+    ) ?? $work;
+
     // 1c. E-mail addresses.
     $work = preg_replace_callback(
         '/(?<![\w.@\x1A])([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i',

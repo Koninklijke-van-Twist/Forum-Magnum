@@ -15,7 +15,7 @@ if (array_key_exists($lang, FM_LANGUAGES)) {
 }
 $back = (string) ($_POST['back'] ?? 'index.php');
 // Alleen terug naar een eigen pagina (geen open redirect).
-if (preg_match('~^/?(?:[A-Za-z0-9_./-]*/)?(index|section|new|thread)\.php(\?[^\s#]*)?$~', $back, $m) !== 1 || str_contains($back, '//')) {
+if (preg_match('~^/?(?:[A-Za-z0-9_./-]*/)?(index|section|new|thread|notifications)\.php(\?[^\s#]*)?$~', $back, $m) !== 1 || str_contains($back, '//')) {
     $back = 'index.php';
 } else {
     $back = $m[1] . '.php' . ($m[2] ?? '');

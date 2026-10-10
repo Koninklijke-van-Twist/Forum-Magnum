@@ -78,6 +78,7 @@ $posts = fm_list_posts($threadId, $page);
 $firstPostId = fm_first_post_id($threadId);
 $editId = (int) ($_GET['edit'] ?? 0);
 $attachmentsByPost = fm_attachments_for_posts(array_column($posts, 'id'));
+$lastReadBefore = fm_last_read($threadId, $fmUser);
 if ($posts !== []) {
     fm_mark_read($threadId, $fmUser, (int) end($posts)['id']);
 }
@@ -97,7 +98,7 @@ foreach ($posts as $post) {
     $canEdit = fm_can_edit_post($post, $fmUser);
     $canDelete = fm_can_delete_post($post, $fmUser);
     $attachments = $attachmentsByPost[$postId] ?? [];
-    echo '<article class="post' . ($postId === $anchor ? ' first-unread' : '') . ($deleted ? ' is-deleted' : '') . '" id="p' . $postId . '">'
+    echo '<article class="post' . ($postId === $anchor ? ' first-unread' : '') . ($postId > $lastReadBefore && !$deleted ? ' is-unread' : '') . ($deleted ? ' is-deleted' : '') . '" id="p' . $postId . '">'
         . fm_poster_html((string) $post['author'])
         . '<div class="post-main"><header class="post-head">'
         . '<a class="post-link" href="' . h(fm_thread_url($threadId, $page, $postId)) . '" title="' . h(fm_t('link_post')) . '">post#' . $postId . '</a>'
@@ -128,7 +129,7 @@ foreach ($posts as $post) {
         echo '<form method="post" enctype="multipart/form-data" class="composer open">' . fm_csrf_field()
             . '<input type="hidden" name="action" value="edit"><input type="hidden" name="post" value="' . $postId . '">'
             . ($postId === $firstPostId ? '<input type="text" name="title" maxlength="150" required aria-label="' . h(fm_t('title')) . '" value="' . h($draft[2] ?? (string) $thread['title']) . '">' : '')
-            . '<textarea name="body" rows="8" data-body-or-files data-empty-msg="' . h(fm_t('err_empty')) . '" aria-label="' . h(fm_t('message')) . '">' . h($draft[1] ?? (string) $post['body']) . '</textarea>'
+            . '<textarea name="body" rows="8" data-mentions data-body-or-files data-empty-msg="' . h(fm_t('err_empty')) . '" aria-label="' . h(fm_t('message')) . '">' . h($draft[1] ?? (string) $post['body']) . '</textarea>'
             . ($removeList !== '' ? '<div class="attachment-removes">' . $removeList . '</div>' : '')
             . '<div class="actions">' . fm_attachment_input_html() . '<a class="btn ghost" href="' . h(fm_thread_url($threadId, $page, $postId)) . '">' . h(fm_t('cancel')) . '</a>'
             . '<button type="submit" class="btn">' . h(fm_t('save')) . '</button></div></form>';
@@ -144,6 +145,6 @@ foreach ($posts as $post) {
 echo '</div>';
 echo fm_pagination($page, $pages, $pagerUrl);
 echo '<form method="post" enctype="multipart/form-data" class="composer open reply" id="reply">' . fm_csrf_field() . '<input type="hidden" name="action" value="reply">'
-    . '<textarea name="body" rows="5" data-body-or-files data-empty-msg="' . h(fm_t('err_empty')) . '" placeholder="' . h(fm_t('reply')) . '" aria-label="' . h(fm_t('message')) . '">' . h($replyBody) . '</textarea>'
+    . '<textarea name="body" rows="5" data-mentions data-body-or-files data-empty-msg="' . h(fm_t('err_empty')) . '" placeholder="' . h(fm_t('reply')) . '" aria-label="' . h(fm_t('message')) . '">' . h($replyBody) . '</textarea>'
     . '<div class="actions">' . fm_attachment_input_html() . '<button type="submit" class="btn">' . h(fm_t('reply')) . '</button></div></form>';
 fm_footer();
