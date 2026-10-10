@@ -66,7 +66,10 @@ form.inline { display: inline; }
 .reply { margin-top: 16px; }
 
 .posts { display: flex; flex-direction: column; gap: 14px; }
-.post { display: grid; grid-template-columns: 200px minmax(0, 1fr); background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; scroll-margin-top: 64px; }
+.post { display: grid; grid-template-columns: 200px minmax(0, 1fr); background: var(--card); border: 1px solid var(--line); border-radius: 10px; scroll-margin-top: 64px; }
+/* Geen overflow:hidden op .post (dat knipt het ⋯-menu af); de kinderen krijgen zelf de hoeken. */
+.post > .poster { border-radius: 9px 0 0 9px; }
+.post > .post-main { border-radius: 0 9px 9px 0; }
 .post.first-unread { box-shadow: 0 0 0 2px #d93025; }
 .poster { background: var(--poster-bg); color: var(--poster-fg); padding: 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .poster-avatar { position: relative; width: 100%; aspect-ratio: 1 / 1; }
@@ -106,6 +109,8 @@ form.inline { display: inline; }
     main { padding: 10px; }
     .brand span { display: none; }
     .post { grid-template-columns: 1fr; }
+    .post > .poster { border-radius: 9px 9px 0 0; }
+    .post > .post-main { border-radius: 0 0 9px 9px; }
     .poster { display: grid; grid-template-columns: 44px minmax(0, 1fr); grid-template-areas: "av id" "av dept"; column-gap: 10px; row-gap: 0; padding: 8px 10px; }
     .poster-avatar { grid-area: av; width: 44px; height: 44px; }
     .admin-badge { width: 18px; height: 18px; right: -4px; bottom: -4px; }
