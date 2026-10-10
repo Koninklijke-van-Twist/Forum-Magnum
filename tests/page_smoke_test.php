@@ -97,19 +97,26 @@ $acsrf = csrf($body);
 $A('POST', 'lang.php', ['lang' => 'nl', 'csrf' => $acsrf, 'back' => '/forum-magnum/section.php?s=general']);
 [$s, $body] = $A('GET', 'index.php');
 check(str_contains($body, 'Aankondigingen') && str_contains($body, 'Werkgerelateerd') && str_contains($body, 'Algemeen'), 'drie secties (NL)');
+check(substr_count($body, '<section class="home-section') === 3 && strpos($body, 'id="sec-announcements"') < strpos($body, 'id="sec-work"') && strpos($body, 'id="sec-work"') < strpos($body, 'id="sec-general"'), 'drie threadlijsten onder elkaar op de startpagina');
+check(substr_count($body, 'href="new.php?s=') === 3, 'admin: nieuwe-thread-knop bij alle drie');
+check(str_contains($body, '<h2><a class="section-link" href="section.php?s=announcements">Aankondigingen</a></h2>'), 'sectiekop linkt naar de sectiepagina');
 
 // Aankondigingen: alleen admin start threads.
-[$s, $body] = $U('GET', 'section.php?s=announcements');
-check_same(200, $s, 'sectie laadt');
-check(!str_contains($body, 'id="new-thread"'), 'gebruiker ziet geen nieuw-thread bij aankondigingen');
-[$s] = $U('POST', 'section.php?s=announcements', ['csrf' => $csrf, 'title' => 'x', 'body' => 'y']);
+[$s, $body] = $U('GET', 'index.php');
+check(!str_contains($body, 'new.php?s=announcements') && str_contains($body, 'new.php?s=work') && str_contains($body, 'new.php?s=general'), 'gebruiker: geen nieuwe-thread-knop bij aankondigingen');
+[$s, , $hdr] = $U('GET', 'new.php?s=announcements');
+check_same('section.php?s=announcements', location($hdr), 'gebruiker: geen formulier, terug naar de lijst');
+[$s] = $U('POST', 'new.php?s=announcements', ['csrf' => $csrf, 'title' => 'x', 'body' => 'y']);
 check_same(403, $s, 'gebruiker kan geen aankondiging posten');
-[$s, $body] = $A('GET', 'section.php?s=announcements');
-check(str_contains($body, 'id="new-thread"'), 'admin ziet nieuw-thread');
-[$s, , $hdr] = $A('POST', 'section.php?s=announcements', ['csrf' => $acsrf, 'title' => 'Welkom <b>', 'body' => "Hallo **allen** <script>alert(1)</script>\nZie #1185"]);
+[$s, , $hdr] = $A('POST', 'lang.php', ['lang' => 'nl', 'csrf' => $acsrf, 'back' => '/forum-magnum/new.php?s=announcements']);
+check_same('new.php?s=announcements', location($hdr), 'taalwissel op nieuwe-thread-pagina blijft daar');
+[$s, $body] = $A('GET', 'new.php?s=announcements');
+check(str_contains($body, 'id="new-thread"'), 'admin ziet nieuw-thread-formulier');
+[$s, , $hdr] = $A('POST', 'new.php?s=announcements', ['csrf' => $acsrf, 'title' => 'Welkom <b>', 'body' => "Hallo **allen** <script>alert(1)</script>\nZie #1185"]);
 check_same(303, $s, 'aankondiging aangemaakt');
 $threadUrl = location($hdr);
 check(str_starts_with($threadUrl, 'thread.php?id='), 'door naar thread');
+check(str_contains($A('GET', $threadUrl)[1], 'href="section.php?s=announcements"'), 'terug-link naar de juiste lijst');
 [$s, $body] = $A('GET', $threadUrl);
 check_same(200, $s, 'thread laadt');
 check(str_contains($body, 'Welkom &lt;b&gt;') && !str_contains($body, '<script>alert'), 'escaping titel en bericht');
@@ -141,10 +148,8 @@ check(substr_count($body, 'edit=') === 1, 'geen losse bewerkknop buiten het menu
 check(str_contains($body, 'edit='), 'gebruiker kan eigen bericht bewerken');
 
 // Admin: ongelezen-indicator, bewerken, verwijderen.
-[$s, $body] = $A('GET', 'section.php?s=announcements');
-check(str_contains($body, 'is-unread') && str_contains($body, '1 nieuw'), 'ongelezen-indicator in lijst');
 [$s, $body] = $A('GET', 'index.php');
-check(str_contains($body, 'class="badge"'), 'ongelezen-badge op sectie');
+check(str_contains($body, 'is-unread') && str_contains($body, '1 nieuw'), 'ongelezen-indicator in lijst');
 [$s, $body] = $A('GET', $threadUrl);
 check(str_contains($body, '>Verwijderen<'), 'admin ziet verwijderen');
 preg_match_all('/id="p(\d+)"/', $body, $m);
@@ -172,14 +177,32 @@ check_same(403, $s, 'gebruiker kan niet verwijderen');
 
 // Algemeen: gebruiker maakt thread; paginering 20 per pagina.
 for ($i = 1; $i <= 21; $i++) {
-    $U('POST', 'section.php?s=general', ['csrf' => $csrf, 'title' => 'Onderwerp ' . $i, 'body' => 'x']);
+    $U('POST', 'new.php?s=general', ['csrf' => $csrf, 'title' => 'Onderwerp ' . $i, 'body' => 'x']);
 }
+for ($i = 1; $i <= 21; $i++) {
+    $U('POST', 'new.php?s=work', ['csrf' => $csrf, 'title' => 'Werk ' . $i, 'body' => 'x']);
+}
+$sectionHtml = static function (string $body, string $section): string {
+    preg_match('/<section class="home-section section-' . $section . '".*?<\/section>/s', $body, $m);
+    return $m[0] ?? '';
+};
+[$s, $body] = $U('GET', 'index.php');
+$gen = $sectionHtml($body, 'general');
+check_same(10, substr_count($gen, '<li class="thread'), 'startpagina: 10 threads algemeen');
+check(strpos($gen, 'Onderwerp 21') < strpos($gen, 'Onderwerp 20'), 'nieuwste eerst');
+check(str_contains($gen, 'href="index.php?p_gen=2#sec-general"'), 'eigen paginering per sectie');
+[$s, $body] = $U('GET', 'index.php?p_gen=3&p_work=2');
+check_same(1, substr_count($sectionHtml($body, 'general'), '<li class="thread'), '1 thread op pagina 3 (algemeen)');
+check_same(10, substr_count($sectionHtml($body, 'work'), '<li class="thread'), 'pagina 2 (werk), onafhankelijk');
+check(str_contains($sectionHtml($body, 'general'), 'href="index.php?p_work=2#sec-general"'), 'bladeren in algemeen houdt de pagina van werk vast');
+check(str_contains($sectionHtml($body, 'work'), 'href="index.php?p_gen=3#sec-work"'), 'bladeren in werk houdt de pagina van algemeen vast');
 [$s, $body] = $U('GET', 'section.php?s=general');
-check_same(20, substr_count($body, '<li class="thread'), '20 threads op pagina 1');
-check(strpos($body, 'Onderwerp 21') < strpos($body, 'Onderwerp 20'), 'nieuwste eerst');
-check(str_contains($body, 'class="pager"') && str_contains($body, 'section.php?s=general&amp;p=2'), 'paginering');
+check_same(20, substr_count($body, '<li class="thread'), 'sectiepagina: 20 per pagina');
+check(str_contains($body, 'href="section.php?s=general&amp;p=2"') && !str_contains($body, 'Aankondigingen</a></h'), 'sectiepagina: alleen die lijst, eigen paginering');
 [$s, $body] = $U('GET', 'section.php?s=general&p=2');
-check_same(1, substr_count($body, '<li class="thread'), '1 thread op pagina 2');
+check_same(1, substr_count($body, '<li class="thread'), 'sectiepagina 2');
+preg_match('/href="(thread\.php\?id=\d+)">Onderwerp 1</', $body, $tm);
+check(str_contains($U('GET', $tm[1])[1], 'href="section.php?s=general&amp;p=2"'), 'terug-link naar de sectiepagina waar de thread staat');
 
 // Avatar: initialen-SVG.
 [$s, $body, $hdr] = $U('GET', 'avatar.php?e=tfalken%40kvt.nl');

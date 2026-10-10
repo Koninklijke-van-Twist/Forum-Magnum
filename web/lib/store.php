@@ -14,6 +14,8 @@ declare(strict_types=1);
 
 const FM_SECTIONS = ['announcements', 'work', 'general'];
 const FM_THREADS_PER_PAGE = 20;
+/** Threads per sectie op de startpagina; de losse sectiepagina toont er FM_THREADS_PER_PAGE. */
+const FM_HOME_PER_PAGE = ['announcements' => 5, 'work' => 10, 'general' => 10];
 const FM_POSTS_PER_PAGE = 50;
 /** Schemaversie in PRAGMA user_version; verhogen bij elke schemawijziging. */
 const FM_SCHEMA_VERSION = 1;
@@ -371,6 +373,18 @@ function fm_section_summary(string $email): array
     }
 
     return $out;
+}
+
+/** Op welke pagina van de sectielijst staat deze thread (zelfde sortering als fm_list_threads). */
+function fm_thread_list_page(array $thread, int $perPage = FM_THREADS_PER_PAGE): int
+{
+    $st = fm_db()->prepare('SELECT COUNT(*) FROM threads WHERE section = ? AND (
+            last_post_at > ? OR (last_post_at = ? AND last_post_id > ?) OR (last_post_at = ? AND last_post_id = ? AND id > ?))');
+    $at = (int) $thread['last_post_at'];
+    $lp = (int) $thread['last_post_id'];
+    $st->execute([(string) $thread['section'], $at, $at, $lp, $at, $lp, (int) $thread['id']]);
+
+    return intdiv((int) $st->fetchColumn(), $perPage) + 1;
 }
 
 function fm_count_posts(int $threadId): int
