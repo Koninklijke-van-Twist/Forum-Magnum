@@ -271,8 +271,23 @@ function fm_delete_post(int $postId, string $email): bool
         return true;
     }
     fm_db()->prepare('UPDATE posts SET deleted_at = ?, deleted_by = ? WHERE id = ?')->execute([time(), strtolower($email), $postId]);
+    fm_refresh_thread_meta($threadId);
 
     return false;
+}
+
+/** Laatste bericht en aantal opnieuw bepalen uit de niet-verwijderde berichten. */
+function fm_refresh_thread_meta(int $threadId): void
+{
+    $st = fm_db()->prepare('SELECT id, author, created_at FROM posts WHERE thread_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 1');
+    $st->execute([$threadId]);
+    $last = $st->fetch();
+    if ($last === false) {
+        return;
+    }
+    fm_db()->prepare('UPDATE threads SET last_post_id = ?, last_author = ?, last_post_at = ?,
+            post_count = (SELECT COUNT(*) FROM posts WHERE thread_id = ? AND deleted_at IS NULL) WHERE id = ?')
+        ->execute([(int) $last['id'], (string) $last['author'], (int) $last['created_at'], $threadId, $threadId]);
 }
 
 function fm_first_post_id(int $threadId): int
@@ -313,7 +328,7 @@ function fm_count_threads(string $section): int
 function fm_list_threads(string $section, string $email, int $page, int $perPage = FM_THREADS_PER_PAGE): array
 {
     $st = fm_db()->prepare('SELECT t.*, COALESCE(r.last_read_post_id, 0) AS last_read,
-            (SELECT COUNT(*) FROM posts p WHERE p.thread_id = t.id AND p.id > COALESCE(r.last_read_post_id, 0)) AS unread
+            (SELECT COUNT(*) FROM posts p WHERE p.thread_id = t.id AND p.deleted_at IS NULL AND p.id > COALESCE(r.last_read_post_id, 0)) AS unread
         FROM threads t LEFT JOIN reads r ON r.thread_id = t.id AND r.email = ?
         WHERE t.section = ? ORDER BY t.last_post_at DESC, t.last_post_id DESC, t.id DESC LIMIT ? OFFSET ?');
     $st->bindValue(1, strtolower($email));
@@ -386,7 +401,7 @@ function fm_last_read(int $threadId, string $email): int
 /** Eerste ongelezen bericht, of 0 als alles gelezen is. */
 function fm_first_unread_post_id(int $threadId, string $email): int
 {
-    $st = fm_db()->prepare('SELECT MIN(id) FROM posts WHERE thread_id = ? AND id > ?');
+    $st = fm_db()->prepare('SELECT MIN(id) FROM posts WHERE thread_id = ? AND id > ? AND deleted_at IS NULL');
     $st->execute([$threadId, fm_last_read($threadId, $email)]);
 
     return (int) $st->fetchColumn();

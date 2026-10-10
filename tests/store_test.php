@@ -59,6 +59,16 @@ check_same([3, 0], fm_resolve_open_page($t, 'anna@kvt.nl'), 'alles gelezen: laat
 check_same(3, fm_page_of_post($t, $ids[100]), 'pagina van bericht');
 check_same([3, 0], fm_resolve_open_page($t, 'bob@kvt.nl'), 'eigen berichten gelden als gelezen');
 
+// Verwijderde laatste reactie: metadata en ongelezen kloppen weer (Bugbot PR #5).
+$m = fm_create_thread('general', 'anna@kvt.nl', 'Mod', 'start', 50000);
+$bad = fm_reply($m, 'spam@kvt.nl', 'spam', 50100);
+fm_delete_post($bad, 'tfalken@kvt.nl');
+$row = fm_get_thread($m);
+check_same(['anna@kvt.nl', 50000, 1, fm_first_post_id($m)], [$row['last_author'], (int) $row['last_post_at'], (int) $row['post_count'], (int) $row['last_post_id']], 'thread-metadata na verwijderen');
+$mine = array_values(array_filter(fm_list_threads('general', 'anna@kvt.nl', 1), fn ($x) => (int) $x['id'] === $m));
+check_same(0, (int) $mine[0]['unread'], 'verwijderd bericht telt niet als ongelezen');
+check_same(0, fm_first_unread_post_id($m, 'anna@kvt.nl'), 'geen ongelezen anker op verwijderd bericht');
+
 // Bewerken en verwijderen.
 $post = fm_get_post($replyId);
 check(fm_can_edit_post($post, 'anna@kvt.nl'), 'eigen bericht bewerken');
