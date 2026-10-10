@@ -1,0 +1,95 @@
+# Forum Magnum
+
+Het interne forum van KVT op https://sleutels.kvt.nl/forum-magnum/. Iedereen die via de
+gedeelde sleutels.kvt.nl-login (Microsoft/Entra SSO) ingelogd is, kan meedoen.
+
+Het vorige Forum Magnum (een forum voor AI-assistenten) is volledig verwijderd; alleen
+het logo (`web/thumbnail.png`) is gebleven.
+
+## Functies
+
+- Drie secties: **Aankondigingen** (alleen beheerders starten threads, iedereen reageert),
+  **Werkgerelateerd** en **Algemeen** (iedereen start threads).
+- Taalkeuze bij de eerste login via vlaggen: Nederlands, Français, Deutsch, English (UK).
+  Per gebruiker opgeslagen; later te wijzigen via de vlag rechtsboven.
+- Threadlijsten: laatste bericht eerst, 20 per pagina, ongelezen-indicator.
+  Binnen een thread: oudste bovenaan, 50 per pagina. Een thread opent op de pagina met
+  je eerste ongelezen bericht (en scrolt ernaartoe), anders op de laatste pagina.
+- Berichtweergave: links een posterblok (avatar, naam + functie, e-mail, afdeling ·
+  bedrijf) in een kleur die deterministisch uit de afdeling volgt (hash → HSL, wit op
+  donkere tint, contrast ≥ 4.5). Op mobiel klapt het blok in tot een balk boven het bericht.
+  Beheerders krijgen `web/assets/admin-badge.svg` (placeholder) bij hun avatar.
+- Berichtopmaak: overgenomen uit Asclepius (`web/lib/markdown.php`): vet/cursief, code,
+  codeblokken, lijsten, citaten, tabellen, toetsen (`[Ctrl]`), autodetectie van URL's,
+  e-mail en telefoonnummers (URL's, e-mails, markdownlinks en code gaan niet nog eens door
+  de telefoondetector). Alle tekst wordt eerst ge-escaped; alleen http(s)/mailto-links.
+  - `#1185` → ticket 1185 in Asclepius; Asclepius-URL's krijgen het label `Ticket #1185`.
+  - `post#123` → forumbericht 123: `post.php?id=123` stuurt door naar de juiste thread,
+    de juiste pagina en het bericht (`#p123`). Elk bericht toont zijn eigen `post#…`-link.
+- Eigen berichten bewerken; beheerders bewerken en verwijderen alles (het eerste bericht
+  verwijderen verwijdert de hele thread). Alle formulieren hebben CSRF-bescherming.
+
+## Op de server
+
+Kopieer `web/auth.example.php` naar `web/auth.php` en vul in (nooit committen; de deploy
+slaat `auth.php` over):
+
+```php
+<?php
+$forumAdmins = [
+    'tfalken@kvt.nl',          // hoofdletters maken niet uit
+];
+
+// Optioneel, aanbevolen: dezelfde Graph-app als Asclepius ($graphCredentials uit
+// Asclepius' auth.php). Application-permissies met admin consent:
+//   User.Read.All            naam, functie, afdeling, bedrijf
+//   ProfilePhoto.Read.All    profielfoto's (of User.Read.All)
+$graphCredentials = [
+    'tenantId' => '…',
+    'clientId' => '…',
+    'clientSecret' => '…',
+];
+```
+
+De oude server-`auth.php` blijft werken (die includet `authhelper.php`, dat daarom als leeg
+bestand bestaat), maar heeft geen `$forumAdmins`: zonder beheerders kan niemand een
+aankondiging starten.
+
+Zonder Graph: naam uit het e-mailadres (of de login), bedrijf uit het e-maildomein
+(`kvt.nl` → Koninklijke van Twist, `hunter.be`, `kvtgermany.de`, `nhmr.nl`, `alistar.net`;
+uit te breiden met `$companyDomains`), en initialen als avatar. Lukt de foto niet
+(bijvoorbeeld HTTP 403 door ontbrekende rechten), dan blijven de initialen staan en staat
+de laatste Graph-status in `web/data/graph_status.json`.
+
+Gebruikers buiten de tenant van de Graph-app (andere KVT-tenants) vallen terug op
+e-mail/domein.
+
+## Opslag
+
+SQLite in `web/data/forum.sqlite` (afgeschermd met `web/data/.htaccess`, die Forum Magnum
+ook zelf neerzet). Schemaversie in `PRAGMA user_version`; migraties draaien in één
+`BEGIN IMMEDIATE`-transactie. Gebruikersinfo wordt 1 dag gecachet (tabel `directory`),
+foto's 1 week in `web/data/avatars/` (een mislukte foto wordt pas na een dag opnieuw
+geprobeerd). De oude forumdatabase (`data/.ht-forum.sqlite`) blijft ongebruikt staan.
+
+## Deploy
+
+GitHub Actions (`.github/workflows/deploy-ftp.yml`) spiegelt `web/` bij elke push op
+`master` via FTP. Uitgesloten: `auth.php`, `cfg.php`, `data`, `data/`, `data/**`, `cache`,
+de root-`.htaccess` en de analytics-database. Na de deploy volgt een rooktest op de URL en
+op `data/forum.sqlite` (moet 403/404 geven).
+
+## Lokaal en tests
+
+```bash
+cp web/auth.example.php web/auth.php
+php -S 127.0.0.1:8080 -t web          # ingelogd als de eerste beheerder (of FM_LOCAL_USER)
+for f in tests/*_test.php; do php "$f" || exit 1; done
+```
+
+Tests (PHP CLI, ook in `.github/workflows/tests.yml`): `store_test.php` (rechten,
+sortering, paginering, ongelezen/open-pagina, bewerken/verwijderen, taal, schema,
+vertalingen compleet), `markdown_test.php` (XSS, links, telefoonregressie, `#1185`,
+`post#123`), `users_test.php` (Graph gemockt: velden, terugval, foto-403, cache,
+afdelingskleur/contrast), `page_smoke_test.php` (alle pagina's via `php -S`, CSRF, rechten,
+taalkeuze, avatars).

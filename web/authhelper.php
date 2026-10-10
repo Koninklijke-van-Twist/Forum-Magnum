@@ -1,4 +1,4 @@
 <?php
 
-// Bewust leeg: oudere server-auth.php kan dit bestand nog includen.
-// Forum Magnum gebruikt alleen $allowedUsers uit auth.php.
+// Bewust leeg: de oude server-auth.php van Forum Magnum includet dit bestand nog.
+// Niet verwijderen zolang die auth.php niet vervangen is.
