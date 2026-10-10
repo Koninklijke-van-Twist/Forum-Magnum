@@ -45,7 +45,8 @@ function http(int $port, string $who, string $method, string $path, array $post 
     curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_COOKIEJAR => $jar, CURLOPT_COOKIEFILE => $jar, CURLOPT_HEADER => true]);
     if ($method === 'POST') {
         curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($post));
+        $hasFile = array_filter($post, static fn ($v) => $v instanceof CURLFile) !== [];
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $hasFile ? $post : http_build_query($post));
     }
     $raw = (string) curl_exec($ch);
     $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -163,6 +164,14 @@ check(!str_contains($body, 'name="action" value="edit"'), 'admin krijgt geen bew
 check_same(403, $s, 'admin kan andermans bericht niet bewerken');
 [$s, $body] = $U('GET', 'thread.php?' . parse_url($threadUrl, PHP_URL_QUERY) . '&edit=' . $replyId);
 check(str_contains($body, 'name="action" value="edit"'), 'eigen bewerkformulier');
+$tooMany = ['action' => 'edit', 'csrf' => $csrf, 'post' => $replyId, 'body' => 'net herschreven tekst'];
+$tmpTxt = tempnam(sys_get_temp_dir(), 'fm');
+file_put_contents($tmpTxt, 'x');
+for ($i = 0; $i <= FM_MAX_ATTACHMENTS_PER_POST; $i++) {
+    $tooMany['files[' . $i . ']'] = new CURLFile($tmpTxt, 'text/plain', 'b' . $i . '.txt');
+}
+[$s, $body] = $U('POST', 'thread.php?' . parse_url($threadUrl, PHP_URL_QUERY) . '&edit=' . $replyId, $tooMany);
+check(str_contains($body, 'class="flash error"') && str_contains($body, '>net herschreven tekst</textarea>'), 'mislukte bewerking houdt de ingetypte tekst');
 [$s] = $U('POST', $threadUrl, ['action' => 'edit', 'csrf' => $csrf, 'post' => $replyId, 'body' => 'aangepast door anna']);
 check_same(303, $s, 'gebruiker bewerkt eigen bericht');
 [$s] = $U('POST', $threadUrl, ['action' => 'edit', 'csrf' => $csrf, 'post' => $firstPost, 'body' => 'kaping']);
@@ -209,6 +218,51 @@ check(str_contains($U('GET', $tm[1])[1], 'href="section.php?s=general&amp;p=2"')
 check_same(200, $s, 'avatar laadt');
 check(stripos($hdr, 'Content-Type: image/svg+xml') !== false && str_contains($body, '>T</text>'), 'initialen-fallback');
 check_same(400, $U('GET', 'avatar.php?e=geen')[0], 'ongeldige avatar-aanvraag');
+
+// Bijlagen: upload (multipart), dedupe, download via file.php, rechten.
+$png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+$pngFile = $data . '/plaatje.png';
+file_put_contents($pngFile, $png);
+$svgFile = $data . '/x.svg';
+file_put_contents($svgFile, '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+[$s, , $hdr] = $U('POST', 'new.php?s=work', ['csrf' => $csrf, 'title' => 'Met bijlage', 'body' => 'zie bijlage',
+    'files[0]' => new CURLFile($pngFile, 'image/png', 'plaatje.png'), 'files[1]' => new CURLFile($svgFile, 'image/svg+xml', 'x.svg')]);
+check_same(303, $s, 'thread met bijlagen');
+$attThread = location($hdr);
+[$s, $body] = $U('GET', $attThread);
+check(str_contains($body, 'enctype="multipart/form-data"') && str_contains($body, 'name="files[]"'), 'uploadveld in formulieren');
+[$s, $nb] = $U('GET', 'new.php?s=work');
+check(preg_match('/<textarea name="body"[^>]*data-body-or-files/', $nb) === 1 && preg_match('/<textarea name="body"[^>]*required/', $nb) === 0, 'nieuwe thread: tekst niet verplicht als er een bijlage is');
+[$s, , $hdr] = $U('POST', 'new.php?s=work', ['csrf' => $csrf, 'title' => 'Alleen bijlage', 'body' => '', 'files[0]' => new CURLFile($pngFile, 'image/png', 'los.png')]);
+check_same(303, $s, 'thread met alleen een bijlage');
+preg_match_all('/href="file\.php\?id=(\d+)"/', $body, $m);
+$ids = array_values(array_unique($m[1]));
+check_same(2, count($ids), 'twee bijlagen getoond');
+check(str_contains($body, '<img src="file.php?id=' . $ids[0] . '&amp;inline=1"'), 'afbeelding als voorbeeld');
+check(!str_contains($body, 'file.php?id=' . $ids[1] . '&amp;inline=1'), 'SVG niet inline');
+[$s, $raw, $hdr] = $U('GET', 'file.php?id=' . $ids[0] . '&inline=1');
+check($s === 200 && $raw === $png, 'download inhoud');
+check(stripos($hdr, 'Content-Type: image/png') !== false && stripos($hdr, 'Content-Disposition: inline') !== false && stripos($hdr, 'X-Content-Type-Options: nosniff') !== false, 'inline afbeelding: type, disposition, nosniff');
+[$s, $raw, $hdr] = $U('GET', 'file.php?id=' . $ids[1] . '&inline=1');
+check(stripos($hdr, 'Content-Type: application/octet-stream') !== false && stripos($hdr, 'Content-Disposition: attachment; filename="x.svg"') !== false, 'SVG altijd als download');
+check(stripos($hdr, 'sandbox') !== false, 'CSP sandbox op downloads');
+check_same(404, $U('GET', 'file.php?id=999999')[0], 'onbekende bijlage 404');
+// Zelfde bestand nog eens (reactie van admin): één bestand op schijf.
+$A('POST', $attThread, ['action' => 'reply', 'csrf' => $acsrf, 'body' => '', 'files[0]' => new CURLFile($pngFile, 'image/png', 'kopie.png')]);
+$stored = glob($data . '/files/*/*/*') ?: [];
+check_same(2, count($stored), 'dedupe op schijf (2 unieke bestanden, 3 bijlagen)');
+// Admin mag geen bijlagen van een ander weghalen; eigenaar wel.
+preg_match('/id="p(\d+)"/', $body, $pm);
+[$s] = $A('POST', $attThread, ['action' => 'edit', 'csrf' => $acsrf, 'post' => (int) $pm[1], 'body' => 'x', 'remove_attachment[0]' => $ids[0]]);
+check_same(403, $s, 'admin kan bijlage van ander niet weghalen');
+[$s] = $U('POST', $attThread, ['action' => 'edit', 'csrf' => $csrf, 'post' => (int) $pm[1], 'body' => 'zie bijlage', 'remove_attachment[0]' => $ids[1]]);
+check_same(303, $s, 'eigenaar haalt bijlage weg');
+check_same(404, $U('GET', 'file.php?id=' . $ids[1])[0], 'weggehaalde bijlage niet meer te downloaden');
+check_same(1, count(glob($data . '/files/*/*/*') ?: []), 'bestand zonder verwijzing opgeruimd');
+// Bericht verwijderen: koppelingen weg, gedeeld bestand blijft voor de andere post.
+$U('POST', $attThread, ['action' => 'delete', 'csrf' => $csrf, 'post' => (int) $pm[1]]);
+check_same(404, $U('GET', 'file.php?id=' . $ids[0])[0], 'bijlage van verwijderd bericht weg');
+check_same(1, count(glob($data . '/files/*/*/*') ?: []), 'gedeeld bestand blijft (reactie admin)');
 
 foreach (['assets/app.css', 'assets/app.js', 'assets/admin-badge.svg', 'assets/flags/nl.svg', 'assets/flags/fr.svg', 'assets/flags/de.svg', 'assets/flags/en.svg', 'thumbnail.png'] as $asset) {
     check_same(200, $U('GET', $asset)[0], "$asset bereikbaar");

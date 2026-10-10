@@ -16,17 +16,23 @@ $threadId = (int) $thread['id'];
 $section = (string) $thread['section'];
 $error = '';
 $replyBody = '';
+$editDraft = null; // [postId, body, title] van een mislukte bewerking: ingetypte tekst niet kwijtraken
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     $action = (string) ($_POST['action'] ?? '');
-    if (!fm_csrf_ok()) {
+    if ($action === 'edit') {
+        $editDraft = [(int) ($_POST['post'] ?? 0), (string) ($_POST['body'] ?? ''), isset($_POST['title']) ? (string) $_POST['title'] : null];
+    }
+    if (fm_upload_request_too_large()) {
+        $error = fm_t('err_too_large');
+    } elseif (!fm_csrf_ok()) {
         $error = fm_t('err_csrf');
         $replyBody = (string) ($_POST['body'] ?? '');
     } else {
         try {
             if ($action === 'reply') {
                 $replyBody = (string) ($_POST['body'] ?? '');
-                $postId = fm_reply($threadId, $fmUser, $replyBody);
+                $postId = fm_reply($threadId, $fmUser, $replyBody, null, fm_normalize_uploads());
                 fm_redirect('post.php?id=' . $postId);
             } elseif ($action === 'edit') {
                 $postId = (int) ($_POST['post'] ?? 0);
@@ -34,7 +40,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 if ($post === null || (int) $post['thread_id'] !== $threadId) {
                     throw new RuntimeException('forbidden');
                 }
-                fm_edit_post($postId, $fmUser, (string) ($_POST['body'] ?? ''), isset($_POST['title']) ? (string) $_POST['title'] : null);
+                fm_edit_post($postId, $fmUser, (string) ($_POST['body'] ?? ''), isset($_POST['title']) ? (string) $_POST['title'] : null,
+                    fm_normalize_uploads(), array_map('intval', (array) ($_POST['remove_attachment'] ?? [])));
+                $editDraft = null;
                 fm_redirect('post.php?id=' . $postId);
             } elseif ($action === 'delete') {
                 $postId = (int) ($_POST['post'] ?? 0);
@@ -45,8 +53,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 fm_delete_post($postId, $fmUser);
                 fm_redirect(fm_thread_url($threadId, fm_page_of_post($threadId, $postId), $postId));
             }
-        } catch (InvalidArgumentException) {
-            $error = fm_t('err_empty');
+        } catch (InvalidArgumentException $e) {
+            $error = fm_error_text($e);
         } catch (RuntimeException) {
             http_response_code(403);
             $error = fm_t('err_forbidden');
@@ -69,6 +77,7 @@ if (isset($_GET['p'])) {
 $posts = fm_list_posts($threadId, $page);
 $firstPostId = fm_first_post_id($threadId);
 $editId = (int) ($_GET['edit'] ?? 0);
+$attachmentsByPost = fm_attachments_for_posts(array_column($posts, 'id'));
 if ($posts !== []) {
     fm_mark_read($threadId, $fmUser, (int) end($posts)['id']);
 }
@@ -87,6 +96,7 @@ foreach ($posts as $post) {
     $deleted = !empty($post['deleted_at']);
     $canEdit = fm_can_edit_post($post, $fmUser);
     $canDelete = fm_can_delete_post($post, $fmUser);
+    $attachments = $attachmentsByPost[$postId] ?? [];
     echo '<article class="post' . ($postId === $anchor ? ' first-unread' : '') . ($deleted ? ' is-deleted' : '') . '" id="p' . $postId . '">'
         . fm_poster_html((string) $post['author'])
         . '<div class="post-main"><header class="post-head">'
@@ -109,20 +119,31 @@ foreach ($posts as $post) {
     if ($deleted) {
         echo '<div class="post-body deleted">' . h(fm_t('deleted_post')) . '</div>';
     } elseif ($canEdit && $editId === $postId) {
-        echo '<form method="post" class="composer open">' . fm_csrf_field()
+        $draft = $editDraft !== null && $editDraft[0] === $postId ? $editDraft : null;
+        $removeList = '';
+        foreach ($attachments as $att) {
+            $removeList .= '<label class="attachment-remove"><input type="checkbox" name="remove_attachment[]" value="' . (int) $att['id'] . '"> '
+                . h(fm_t('remove_attachment')) . ': ' . h((string) $att['original_name']) . '</label>';
+        }
+        echo '<form method="post" enctype="multipart/form-data" class="composer open">' . fm_csrf_field()
             . '<input type="hidden" name="action" value="edit"><input type="hidden" name="post" value="' . $postId . '">'
-            . ($postId === $firstPostId ? '<input type="text" name="title" maxlength="150" required aria-label="' . h(fm_t('title')) . '" value="' . h((string) $thread['title']) . '">' : '')
-            . '<textarea name="body" rows="8" required aria-label="' . h(fm_t('message')) . '">' . h((string) $post['body']) . '</textarea>'
-            . '<div class="actions"><a class="btn ghost" href="' . h(fm_thread_url($threadId, $page, $postId)) . '">' . h(fm_t('cancel')) . '</a>'
+            . ($postId === $firstPostId ? '<input type="text" name="title" maxlength="150" required aria-label="' . h(fm_t('title')) . '" value="' . h($draft[2] ?? (string) $thread['title']) . '">' : '')
+            . '<textarea name="body" rows="8" data-body-or-files data-empty-msg="' . h(fm_t('err_empty')) . '" aria-label="' . h(fm_t('message')) . '">' . h($draft[1] ?? (string) $post['body']) . '</textarea>'
+            . ($removeList !== '' ? '<div class="attachment-removes">' . $removeList . '</div>' : '')
+            . '<div class="actions">' . fm_attachment_input_html() . '<a class="btn ghost" href="' . h(fm_thread_url($threadId, $page, $postId)) . '">' . h(fm_t('cancel')) . '</a>'
             . '<button type="submit" class="btn">' . h(fm_t('save')) . '</button></div></form>';
     } else {
-        echo '<div class="post-body message-md">' . renderTicketMessageMarkdown((string) $post['body']) . '</div>';
+        echo '<div class="post-body message-md">' . renderTicketMessageMarkdown((string) $post['body'], 0, $attachments) . '</div>';
+        $listed = fm_unreferenced_attachments($attachments, (string) $post['body']);
+        if ($listed !== []) {
+            echo '<div class="attachments" aria-label="' . h(fm_t('attachments')) . '">' . implode('', array_map('fm_attachment_html', $listed)) . '</div>';
+        }
     }
     echo '</div></article>';
 }
 echo '</div>';
 echo fm_pagination($page, $pages, $pagerUrl);
-echo '<form method="post" class="composer open reply" id="reply">' . fm_csrf_field() . '<input type="hidden" name="action" value="reply">'
-    . '<textarea name="body" rows="5" required placeholder="' . h(fm_t('reply')) . '" aria-label="' . h(fm_t('message')) . '">' . h($replyBody) . '</textarea>'
-    . '<div class="actions"><button type="submit" class="btn">' . h(fm_t('reply')) . '</button></div></form>';
+echo '<form method="post" enctype="multipart/form-data" class="composer open reply" id="reply">' . fm_csrf_field() . '<input type="hidden" name="action" value="reply">'
+    . '<textarea name="body" rows="5" data-body-or-files data-empty-msg="' . h(fm_t('err_empty')) . '" placeholder="' . h(fm_t('reply')) . '" aria-label="' . h(fm_t('message')) . '">' . h($replyBody) . '</textarea>'
+    . '<div class="actions">' . fm_attachment_input_html() . '<button type="submit" class="btn">' . h(fm_t('reply')) . '</button></div></form>';
 fm_footer();

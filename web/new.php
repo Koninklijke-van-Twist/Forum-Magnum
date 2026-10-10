@@ -31,14 +31,16 @@ $body = '';
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     $title = (string) ($_POST['title'] ?? '');
     $body = (string) ($_POST['body'] ?? '');
-    if (!fm_csrf_ok()) {
+    if (fm_upload_request_too_large()) {
+        $error = fm_t('err_too_large');
+    } elseif (!fm_csrf_ok()) {
         $error = fm_t('err_csrf');
     } else {
         try {
-            $threadId = fm_create_thread($section, $fmUser, $title, $body);
+            $threadId = fm_create_thread($section, $fmUser, $title, $body, null, fm_normalize_uploads());
             fm_redirect(fm_thread_url($threadId));
-        } catch (InvalidArgumentException) {
-            $error = fm_t('err_empty');
+        } catch (InvalidArgumentException $e) {
+            $error = fm_error_text($e);
         }
     }
 }
@@ -49,8 +51,8 @@ echo '<div class="bar"><h1>' . h(fm_section_label($section)) . ' · ' . h(fm_t('
 if ($error !== '') {
     echo '<p class="flash error">' . h($error) . '</p>';
 }
-echo '<form method="post" id="new-thread" class="composer open">' . fm_csrf_field()
+echo '<form method="post" enctype="multipart/form-data" id="new-thread" class="composer open">' . fm_csrf_field()
     . '<input type="text" name="title" maxlength="150" required autofocus placeholder="' . h(fm_t('title')) . '" aria-label="' . h(fm_t('title')) . '" value="' . h($title) . '">'
-    . '<textarea name="body" rows="10" required placeholder="' . h(fm_t('message')) . '" aria-label="' . h(fm_t('message')) . '">' . h($body) . '</textarea>'
-    . '<div class="actions"><a class="btn ghost" href="' . h($back) . '">' . h(fm_t('cancel')) . '</a><button type="submit" class="btn">' . h(fm_t('post')) . '</button></div></form>';
+    . '<textarea name="body" rows="10" data-body-or-files data-empty-msg="' . h(fm_t('err_empty')) . '" placeholder="' . h(fm_t('message')) . '" aria-label="' . h(fm_t('message')) . '">' . h($body) . '</textarea>'
+    . '<div class="actions">' . fm_attachment_input_html() . '<a class="btn ghost" href="' . h($back) . '">' . h(fm_t('cancel')) . '</a><button type="submit" class="btn">' . h(fm_t('post')) . '</button></div></form>';
 fm_footer();

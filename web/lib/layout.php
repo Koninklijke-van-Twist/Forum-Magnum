@@ -207,6 +207,17 @@ function fm_pagination(int $page, int $pages, callable $url): string
     return $html . '</nav>';
 }
 
+/** Foutmelding bij een InvalidArgumentException uit store/attachments. */
+function fm_error_text(InvalidArgumentException $e): string
+{
+    return match ($e->getMessage()) {
+        'too_large' => fm_t('err_too_large'),
+        'too_many' => fm_t('err_too_many'),
+        'upload_error' => fm_t('err_upload'),
+        default => fm_t('err_empty'),
+    };
+}
+
 function fm_section_label(string $section): string
 {
     return fm_t('sec_' . $section);

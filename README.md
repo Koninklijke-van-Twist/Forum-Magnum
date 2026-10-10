@@ -40,6 +40,23 @@ het logo (`web/thumbnail.png`) is gebleven.
   thread-metadata (laatste bericht, aantal, ongelezen) wordt in dezelfde `BEGIN IMMEDIATE`-
   transactie herberekend. Alle formulieren hebben CSRF-bescherming.
 
+- Bijlagen in Asclepius-stijl: max. 20 MB per bestand (zoals `MAX_ATTACHMENT_BYTES` in
+  Asclepius) en max. 10 per bericht. Afbeeldingen (png/jpg/gif/webp/bmp) worden als
+  voorbeeld getoond, andere bestanden als downloadlink. Met `[[attachment:naam]]` zet je een
+  bijlage op een vaste plek in de tekst. Bij bewerken kun je bijlagen weghalen en toevoegen.
+  - Opslag content-addressed: `web/data/files/ab/cd/<sha256>`, plus koppeltabel
+    `post_attachments` (post_id, hash, originele naam, mime, grootte). Hetzelfde bestand
+    twee keer uploaden levert één bestand op de server op.
+  - Een bericht verwijderen of een bijlage weghalen verwijdert de koppeling. Het bestand
+    zelf gaat pas weg als geen enkel bericht er nog naar verwijst; dat opruimen gebeurt na
+    de transactie, in een eigen `BEGIN IMMEDIATE`.
+  - Downloaden alleen via `file.php` (vereist login). Alleen rasterafbeeldingen gaan
+    inline met hun eigen type; al het andere (ook SVG) als `application/octet-stream`
+    met `attachment`, `nosniff` en `CSP: sandbox`. `data/` zelf is via `.htaccess`
+    afgeschermd.
+  - Let op de PHP-limieten op de server: `upload_max_filesize` ≥ 20M en `post_max_size`
+    groot genoeg voor meerdere bestanden. Een te grote POST geeft een nette melding.
+
 ## Op de server
 
 Kopieer `web/auth.example.php` naar `web/auth.php` en vul in (nooit committen; de deploy
@@ -98,7 +115,7 @@ php -S 127.0.0.1:8080 -t web          # ingelogd als de eerste beheerder (of FM_
 for f in tests/*_test.php; do php "$f" || exit 1; done
 ```
 
-Tests (PHP CLI, ook in `.github/workflows/tests.yml`): `store_test.php` (rechten,
+Tests (PHP CLI, ook in `.github/workflows/tests.yml`): `attachments_test.php` (dedupe, referentietelling, opruimen na rollback, rechten, limieten, inline/SVG), `store_test.php` (rechten,
 sortering, paginering, ongelezen/open-pagina, bewerken/verwijderen, taal, schema,
 vertalingen compleet), `markdown_test.php` (XSS, links, telefoonregressie, `#1185`,
 `post#123`), `users_test.php` (Graph gemockt: velden, terugval, foto-403, cache,

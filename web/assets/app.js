@@ -54,3 +54,25 @@
         }
     });
 }());
+
+/* Tekst of bijlage verplicht (de server staat een bericht met alleen bijlagen toe). */
+document.addEventListener('submit', function (e) {
+    var ta = e.target.querySelector && e.target.querySelector('textarea[data-body-or-files]');
+    if (!ta) { return; }
+    var files = e.target.querySelector('input[type=file]');
+    var keeps = e.target.querySelectorAll('input[name="remove_attachment[]"]:not(:checked)').length;
+    if (ta.value.trim() === '' && !(files && files.files.length) && keeps === 0) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        ta.setCustomValidity(ta.getAttribute('data-empty-msg') || ' ');
+        ta.reportValidity();
+    }
+}, true);
+/* Elke wijziging in het formulier (tekst, bestand kiezen, bijlage-vinkje) wist de melding weer,
+   anders blokkeert de browser een later geldige verzending met alleen bijlagen. */
+['input', 'change'].forEach(function (type) {
+    document.addEventListener(type, function (e) {
+        var ta = e.target.form && e.target.form.querySelector('textarea[data-body-or-files]');
+        if (ta) { ta.setCustomValidity(''); }
+    }, true);
+});

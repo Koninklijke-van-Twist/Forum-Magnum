@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/i18n.php';
 require_once __DIR__ . '/store.php';
+require_once __DIR__ . '/attachments.php';
 require_once __DIR__ . '/users.php';
 require_once __DIR__ . '/markdown.php';
 require_once __DIR__ . '/layout.php';
