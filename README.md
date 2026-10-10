@@ -12,7 +12,13 @@ het logo (`web/thumbnail.png`) is gebleven.
   **Werkgerelateerd** en **Algemeen** (iedereen start threads).
 - Taalkeuze bij de eerste login via vlaggen: Nederlands, Français, Deutsch, English (UK).
   Per gebruiker opgeslagen; later te wijzigen via de vlag rechtsboven.
-- Threadlijsten: laatste bericht eerst, 20 per pagina, ongelezen-indicator.
+- Startpagina: de drie threadlijsten onder elkaar, elk met eigen kop, nieuwe-thread-knop
+  (waar toegestaan) en eigen paginering (`?p_ann=`, `?p_work=`, `?p_gen=`): Aankondigingen
+  per 5, Werkgerelateerd en Algemeen per 10. Klik op een sectiekop voor de losse
+  sectiepagina (`section.php?s=<sectie>&p=<n>`, alleen die lijst, 20 per pagina). Een nieuwe
+  thread maak je op `new.php?s=<sectie>`; de terug-link in een thread wijst naar de
+  sectiepagina waarop die thread staat.
+- Threadlijsten: laatste bericht eerst, ongelezen-indicator.
   Binnen een thread: oudste bovenaan, 50 per pagina. Een thread opent op de pagina met
   je eerste ongelezen bericht (en scrolt ernaartoe), anders op de laatste pagina.
 - Berichtweergave: links een posterblok (avatar, naam + functie, e-mail, afdeling ·

@@ -78,7 +78,8 @@ if ($posts !== []) {
 }
 
 $pagerUrl = static fn (int $n) => fm_thread_url($threadId, $n);
-fm_header((string) $thread['title'], [[fm_section_label($section), fm_section_url($section)], [(string) $thread['title'], null]]);
+$backUrl = fm_section_page_url($section, fm_thread_list_page(fm_get_thread($threadId) ?? $thread));
+fm_header((string) $thread['title'], [[fm_section_label($section), $backUrl], [(string) $thread['title'], null]]);
 echo '<div class="bar"><h1>' . h((string) $thread['title']) . '</h1></div>';
 if ($error !== '') {
     echo '<p class="flash error">' . h($error) . '</p>';
@@ -121,14 +122,13 @@ foreach ($posts as $post) {
         echo '<form method="post" enctype="multipart/form-data" class="composer open">' . fm_csrf_field()
             . '<input type="hidden" name="action" value="edit"><input type="hidden" name="post" value="' . $postId . '">'
             . ($postId === $firstPostId ? '<input type="text" name="title" maxlength="150" required aria-label="' . h(fm_t('title')) . '" value="' . h((string) $thread['title']) . '">' : '')
-            . '<textarea name="body" rows="8" aria-label="' . h(fm_t('message')) . '">' . h((string) $post['body']) . '</textarea>'
+            . '<textarea name="body" rows="8" data-body-or-files data-empty-msg="' . h(fm_t('err_empty')) . '" aria-label="' . h(fm_t('message')) . '">' . h((string) $post['body']) . '</textarea>'
             . ($removeList !== '' ? '<div class="attachment-removes">' . $removeList . '</div>' : '')
             . '<div class="actions">' . fm_attachment_input_html() . '<a class="btn ghost" href="' . h(fm_thread_url($threadId, $page, $postId)) . '">' . h(fm_t('cancel')) . '</a>'
             . '<button type="submit" class="btn">' . h(fm_t('save')) . '</button></div></form>';
     } else {
         echo '<div class="post-body message-md">' . renderTicketMessageMarkdown((string) $post['body'], 0, $attachments) . '</div>';
-        $inText = fm_referenced_attachment_names((string) $post['body']);
-        $listed = array_filter($attachments, static fn ($a) => !in_array((string) $a['original_name'], $inText, true));
+        $listed = fm_unreferenced_attachments($attachments, (string) $post['body']);
         if ($listed !== []) {
             echo '<div class="attachments" aria-label="' . h(fm_t('attachments')) . '">' . implode('', array_map('fm_attachment_html', $listed)) . '</div>';
         }
@@ -138,6 +138,6 @@ foreach ($posts as $post) {
 echo '</div>';
 echo fm_pagination($page, $pages, $pagerUrl);
 echo '<form method="post" enctype="multipart/form-data" class="composer open reply" id="reply">' . fm_csrf_field() . '<input type="hidden" name="action" value="reply">'
-    . '<textarea name="body" rows="5" placeholder="' . h(fm_t('reply')) . '" aria-label="' . h(fm_t('message')) . '">' . h($replyBody) . '</textarea>'
+    . '<textarea name="body" rows="5" data-body-or-files data-empty-msg="' . h(fm_t('err_empty')) . '" placeholder="' . h(fm_t('reply')) . '" aria-label="' . h(fm_t('message')) . '">' . h($replyBody) . '</textarea>'
     . '<div class="actions">' . fm_attachment_input_html() . '<button type="submit" class="btn">' . h(fm_t('reply')) . '</button></div></form>';
 fm_footer();

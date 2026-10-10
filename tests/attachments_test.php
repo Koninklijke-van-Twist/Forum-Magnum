@@ -88,4 +88,15 @@ check_same(["a&b'.png"], fm_referenced_attachment_names("Kijk:\n[[attachment:a&b
 check_same('_script_.svg', $atts[1]['original_name'], 'gevaarlijke tekens uit naam');
 check(!fm_is_inline_image($atts[1]) && !str_contains(fm_attachment_html($atts[1]), '<img'), 'SVG nooit inline');
 
+// Dubbele namen: uniek gemaakt, niets onbereikbaar (Bugbot PR #6).
+$t3 = fm_create_thread('general', 'anna@kvt.nl', 'Dubbel', "[[attachment:scherm.png]]", 3000, [upload('scherm.png', $png), upload('scherm.png', 'ander')]);
+$p3 = fm_first_post_id($t3);
+check_same(['scherm.png', 'scherm (2).png'], array_column(fm_post_attachments($p3), 'original_name'), 'dubbele naam krijgt (2)');
+fm_edit_post($p3, 'anna@kvt.nl', '[[attachment:scherm.png]]', null, [upload('Scherm.png', 'derde')]);
+check_same('Scherm (3).png', fm_post_attachments($p3)[2]['original_name'], 'ook bij bewerken, hoofdletterongevoelig');
+$rest = fm_unreferenced_attachments(fm_post_attachments($p3), '[[attachment:scherm.png]]');
+check_same(['scherm (2).png', 'Scherm (3).png'], array_column($rest, 'original_name'), 'alleen de inline getoonde valt uit de lijst');
+$legacy = [['id' => 1, 'original_name' => 'a.png'], ['id' => 2, 'original_name' => 'a.png']];
+check_same([2], array_column(fm_unreferenced_attachments($legacy, '[[attachment:a.png]]'), 'id'), 'bestaande dubbele namen: tweede blijft zichtbaar in de lijst');
+
 finish('attachments');

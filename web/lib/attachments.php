@@ -169,11 +169,51 @@ function fm_store_file(array $file): array
 /** Bijlagen koppelen aan een bericht. Aanroepen binnen fm_transaction. */
 function fm_attach_files(PDO $pdo, int $postId, array $files, int $now): void
 {
+    $st = $pdo->prepare('SELECT original_name FROM post_attachments WHERE post_id = ?');
+    $st->execute([$postId]);
+    $taken = array_fill_keys(array_map('mb_strtolower', $st->fetchAll(PDO::FETCH_COLUMN)), true);
     foreach ($files as $file) {
         $stored = fm_store_file($file);
+        // Namen uniek per bericht, zodat [[attachment:naam]] altijd één bijlage aanwijst.
+        $name = fm_unique_filename(fm_clean_filename((string) $file['name']), $taken);
+        $taken[mb_strtolower($name)] = true;
         $pdo->prepare('INSERT INTO post_attachments (post_id, hash, original_name, mime, size, created_at) VALUES (?,?,?,?,?,?)')
-            ->execute([$postId, $stored['hash'], fm_clean_filename((string) $file['name']), $stored['mime'], $stored['size'], $now]);
+            ->execute([$postId, $stored['hash'], $name, $stored['mime'], $stored['size'], $now]);
     }
+}
+
+/** "foto.png" wordt "foto (2).png" als die naam in het bericht al bestaat. */
+function fm_unique_filename(string $name, array $taken): string
+{
+    if (!isset($taken[mb_strtolower($name)])) {
+        return $name;
+    }
+    $dot = strrpos($name, '.');
+    $base = $dot > 0 ? substr($name, 0, $dot) : $name;
+    $ext = $dot > 0 ? substr($name, $dot) : '';
+    for ($i = 2; ; $i++) {
+        $candidate = $base . ' (' . $i . ')' . $ext;
+        if (!isset($taken[mb_strtolower($candidate)])) {
+            return $candidate;
+        }
+    }
+}
+
+/**
+ * Bijlagen die niet al inline staan. Per [[attachment:naam]] valt alleen de bijlage af
+ * die de inline-weergave echt toont (de eerste match, op id), nooit alle met die naam.
+ */
+function fm_unreferenced_attachments(array $attachments, string $body): array
+{
+    $used = [];
+    foreach (fm_referenced_attachment_names($body) as $name) {
+        $match = findAttachmentByOriginalName($attachments, $name);
+        if ($match !== null) {
+            $used[(int) $match['id']] = true;
+        }
+    }
+
+    return array_values(array_filter($attachments, static fn ($a) => !isset($used[(int) $a['id']])));
 }
 
 /**
