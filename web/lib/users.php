@@ -352,14 +352,27 @@ function fm_department_color(string $department): array
     }
     $hash = hexdec(substr(hash('sha256', $key), 0, 8));
     $hue = $hash % 360;
-    $sat = 45 + ($hash >> 9) % 20;     // 45-64%
-    // Geel/groen is licht van zichzelf: daar donkerder om contrast met wit te houden.
-    $light = ($hue >= 40 && $hue <= 200) ? 28 : 36;
+    // Pastelachtig (light mode): lage verzadiging, zo licht mogelijk (max 48%) maar altijd
+    // WCAG-contrast >= 4.5:1 met witte tekst. Geel/groen komt daardoor vanzelf donkerder uit.
+    $sat = 35 + ($hash >> 9) % 11;     // 35-45%
+    $light = fm_lightest_for_white($hue, $sat, 48);
 
     return ['bg' => "hsl($hue, {$sat}%, {$light}%)", 'fg' => '#ffffff', 'soft' => "hsl($hue, 40%, 95%)", 'hue' => $hue];
 }
 
-/** Relatieve luminantie-contrast van wit tegen een HSL-kleur (voor de tests). */
+/** Hoogste lightness (<= $max) waarbij wit nog >= 4.5:1 contrast heeft op hsl($hue, $sat%, l%). */
+function fm_lightest_for_white(int $hue, int $sat, int $max = 48): int
+{
+    for ($l = $max; $l > 10; $l--) {
+        if (fm_contrast_with_white($hue, $sat, $l) >= 4.5) {
+            return $l;
+        }
+    }
+
+    return 10;
+}
+
+/** Relatieve luminantie-contrast van wit tegen een HSL-kleur. */
 function fm_contrast_with_white(int $h, int $s, int $l): float
 {
     $s /= 100;

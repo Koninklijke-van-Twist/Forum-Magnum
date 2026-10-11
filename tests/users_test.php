@@ -17,14 +17,36 @@ check_same('?', fm_initials(''), 'lege naam');
 // Kleur: deterministisch, verschillend per afdeling, contrast met wit >= 4.5.
 check_same(fm_department_color('ICT'), fm_department_color(' ict '), 'deterministisch, hoofdletterongevoelig');
 check(fm_department_color('ICT')['bg'] !== fm_department_color('Verkoop')['bg'], 'andere afdeling, andere kleur');
-foreach (['ICT', 'Verkoop', 'Service', 'Financiën', 'Werkplaats', 'HR', 'Inkoop', 'Directie', 'Logistiek', 'Engineering', ''] as $dept) {
+// Pastel: verzadiging 35-45%, lightness <= 48%, en altijd contrast >= 4.5 met wit.
+$depts = ['ICT', 'Verkoop', 'Service', 'Financiën', 'Werkplaats', 'HR', 'Inkoop', 'Directie', 'Logistiek', 'Engineering', '70 - Service',
+    '21 - Engineering & Werkvoorbereiding', 'Projecten', 'Beheer', 'Magazijn', 'Kwaliteit', 'Planning', 'Montage', 'Marketing', 'Juridisch', ''];
+for ($i = 0; $i < 200; $i++) {
+    $depts[] = 'Afdeling ' . $i;
+}
+$bad = [];
+$pastel = 0;
+foreach ($depts as $dept) {
     preg_match('/hsl\((\d+), (\d+)%, (\d+)%\)/', fm_department_color($dept)['bg'], $m);
-    check(fm_contrast_with_white((int) $m[1], (int) $m[2], (int) $m[3]) >= 4.5, "contrast wit op afdeling '$dept'");
+    [$hh, $ss, $ll] = [(int) $m[1], (int) $m[2], (int) $m[3]];
+    if (fm_contrast_with_white($hh, $ss, $ll) < 4.5) {
+        $bad[] = $dept;
+    }
+    if ($dept !== '' && ($ss < 35 || $ss > 45 || $ll > 48)) {
+        $bad[] = "$dept (s=$ss l=$ll)";
+    }
+    $pastel += ($dept !== '' && $ll >= 40) ? 1 : 0;
 }
-for ($hue = 0; $hue < 360; $hue += 5) {
-    $light = ($hue >= 40 && $hue <= 200) ? 28 : 36;
-    check(fm_contrast_with_white($hue, 64, $light) >= 4.5, "contrast hue $hue");
+check_same([], $bad, 'contrast >= 4.5 en pastelbereik voor ' . count($depts) . ' afdelingen');
+check($pastel > count($depts) / 3, 'een flink deel van de kleuren zit op lightness 40-48%');
+for ($hue = 0; $hue < 360; $hue++) {
+    foreach ([35, 45] as $sat) {
+        $l = fm_lightest_for_white($hue, $sat);
+        if (fm_contrast_with_white($hue, $sat, $l) < 4.5 || ($l < 48 && fm_contrast_with_white($hue, $sat, $l + 1) >= 4.5)) {
+            $bad[] = "$hue/$sat";
+        }
+    }
 }
+check_same([], $bad, 'lichtste toegestane lightness per hue klopt');
 
 // Met Graph (gemockt): gebruikersinfo + foto 403 => initialen en status.
 $GLOBALS['graphCredentials'] = ['tenantId' => 't', 'clientId' => 'c', 'clientSecret' => 's'];
