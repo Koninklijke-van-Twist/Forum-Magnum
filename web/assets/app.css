@@ -74,25 +74,28 @@ form.inline { display: inline; }
 .poster { background: var(--poster-bg); color: var(--poster-fg); display: flex; min-width: 0; }
 .poster-card { flex: 1; min-width: 0; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 /* Afdeling: verticale strook rechts, leest van onder naar boven, altijd één regel (app.js verkleint zo nodig). */
-.poster-dept { flex: none; width: 28px; contain: size; padding: 10px 0; border-left: 1px solid rgba(255,255,255,.3); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.poster-dept { flex: none; width: 28px; contain: size; padding: 10px 0; border-left: 1px solid var(--poster-line, rgba(255,255,255,.3)); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .poster-dept-text { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-height: 100%; font-size: 1rem; line-height: 1; letter-spacing: .06em; }
 .poster-meta { display: none; }
-.poster-company { margin-top: auto; padding-top: 6px; border-top: 1px solid rgba(255,255,255,.3); font-size: .8rem; font-weight: 600; letter-spacing: .02em; }
+.poster-company { margin-top: auto; padding-top: 6px; border-top: 1px solid var(--poster-line, rgba(255,255,255,.3)); font-size: .8rem; font-weight: 600; letter-spacing: .02em; }
 /* Avatar en naam openen het profiel; naam ziet eruit als gewone tekst. */
 .poster-open { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; border-radius: 6px; }
-.poster-open:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.poster-open:focus-visible { outline: 2px solid var(--poster-fg); outline-offset: 2px; }
 .poster-avatar-btn { flex: none; display: block; }
 .poster-name:hover { text-decoration: underline; }
 /* Linksboven het bedrijfslogo, rechts daarnaast het vierkante avatar. */
 .poster-top { display: flex; align-items: flex-start; gap: 8px; }
-.poster-avatar { width: 90px; height: 90px; flex: none; object-fit: cover; border-radius: 6px; display: block; background: rgba(255,255,255,.15); }
-.company-logo { width: 32px; height: 32px; flex: none; display: inline-block; background: #fff;
+.poster-avatar { width: 90px; height: 90px; flex: none; object-fit: cover; border-radius: 6px; display: block; background: var(--poster-line); }
+.company-logo-wrap { flex: none; display: inline-flex; }
+/* Goud op pastel: subtiele donkere rand/schaduw zodat het logo zichtbaar blijft. */
+.company-logo-wrap.is-admin { filter: drop-shadow(0 0 .6px rgba(0,0,0,.7)) drop-shadow(0 1px 1px rgba(0,0,0,.25)); }
+.company-logo { width: 32px; height: 32px; flex: none; display: inline-block; background: var(--poster-fg);
     -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-position: center; mask-position: center; }
 /* Beheerder: glimmend goud (lineaire gradient op ~60 graden). */
 .company-logo.is-admin { background: linear-gradient(60deg, #8a6a1f 0%, #f7e08a 30%, #c9972c 55%, #fff3b0 75%, #a8781e 100%); }
 .poster-id { display: flex; flex-direction: column; min-width: 0; }
 .poster-name { font-size: 1rem; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
-.poster-mail { color: var(--poster-fg); font-size: .72rem; opacity: .85; overflow-wrap: anywhere; }
+.poster-mail { color: var(--poster-fg); font-size: .72rem; overflow-wrap: anywhere; }
 .post-main { position: relative; padding: 12px 16px 0; min-width: 0; display: flex; flex-direction: column; background: linear-gradient(var(--card), var(--card)); }
 /* Voetregel onderaan het bericht: permalink links, datum/bewerkt rechts. */
 .post-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin: 10px -16px 0; padding: 4px 10px 5px; border-top: 1px solid var(--line); color: var(--muted); font-size: .78rem; }

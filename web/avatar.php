@@ -24,6 +24,6 @@ if ($photo !== null) {
 $info = fm_user_info($email);
 $color = fm_department_color($info['department']);
 header('Content-Type: image/svg+xml; charset=utf-8');
-echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" fill="' . h($color['bg']) . '"/>'
-    . '<text x="60" y="60" dy=".35em" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="48" font-weight="600" fill="#fff">'
+echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" fill="' . h($color['avatar'] ?? $color['bg']) . '"/>'
+    . '<text x="60" y="60" dy=".35em" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="48" font-weight="600" fill="' . h($color['fg']) . '">'
     . h(fm_initials($info['name'])) . '</text></svg>';

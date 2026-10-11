@@ -241,8 +241,9 @@ function fm_company_logo_html(string $email, string $company): string
     }
     $url = 'assets/company/' . $key . '.svg?v=' . (int) @filemtime(__DIR__ . '/../assets/company/' . $key . '.svg');
 
-    return '<span class="company-logo' . ($admin ? ' is-admin' : '') . '" role="img" aria-label="' . h($label) . '" title="' . h($label) . '"'
-        . ' style="' . h('-webkit-mask-image:url("' . $url . '");mask-image:url("' . $url . '")') . '"></span>';
+    // Wrapper draagt de schaduw: een filter op het gemaskeerde element zelf zou mee weggemaskeerd worden.
+    return '<span class="company-logo-wrap' . ($admin ? ' is-admin' : '') . '"><span class="company-logo' . ($admin ? ' is-admin' : '') . '" role="img" aria-label="' . h($label) . '" title="' . h($label) . '"'
+        . ' style="' . h('-webkit-mask-image:url("' . $url . '");mask-image:url("' . $url . '")') . '"></span></span>';
 }
 
 /**
@@ -254,7 +255,7 @@ function fm_poster_html(string $email): string
 {
     $info = fm_user_info($email);
     $color = fm_department_color($info['department']);
-    $style = '--poster-bg:' . $color['bg'] . ';--poster-fg:' . $color['fg'] . ';--poster-soft:' . $color['soft'];
+    $style = '--poster-bg:' . $color['bg'] . ';--poster-fg:' . $color['fg'] . ';--poster-line:' . $color['line'] . ';--poster-soft:' . $color['soft'];
     $profile = h(fm_t('profile', $info['name']));
     $dept = trim($info['department']);
 
