@@ -224,3 +224,43 @@ function fitAll(root) {
     });
 }
 fitAll(document);
+
+/* ⋯-menu → 'Kopieer link': absolute permalink (post.php?id=..) naar het klembord, met fallback. */
+function fmToast(text) {
+    var t = document.createElement('div');
+    t.className = 'toast';
+    t.setAttribute('role', 'status');
+    t.textContent = text;
+    document.body.appendChild(t);
+    setTimeout(function () { t.classList.add('hide'); }, 1400);
+    setTimeout(function () { t.remove(); }, 1800);
+}
+function fmCopyFallback(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+    ta.remove();
+    return ok;
+}
+document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-copy-link]');
+    if (!b) { return; }
+    e.preventDefault();
+    var url = new URL(b.getAttribute('data-copy-link'), window.location.href).href;
+    var done = function () {
+        var menu = b.closest('details');
+        if (menu) { menu.removeAttribute('open'); }
+        fmToast(b.getAttribute('data-copied') || '');
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(url).then(done, function () { if (fmCopyFallback(url)) { done(); } });
+    } else if (fmCopyFallback(url)) {
+        done();
+    }
+});

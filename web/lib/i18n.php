@@ -14,6 +14,8 @@ function fm_strings(): array
 {
     return [
         'nl' => [
+            'copy_link' => 'Kopieer link',
+            'link_copied' => 'Link gekopieerd',
             'months_short' => 'jan,feb,mrt,apr,mei,jun,jul,aug,sep,okt,nov,dec',
             'weekdays_short' => 'ma,di,wo,do,vr,za,zo',
             'close' => 'Sluiten',
@@ -67,6 +69,8 @@ function fm_strings(): array
             'yesterday' => 'gisteren %s',
         ],
         'fr' => [
+            'copy_link' => 'Copier le lien',
+            'link_copied' => 'Lien copié',
             'months_short' => 'janv,févr,mars,avr,mai,juin,juil,août,sept,oct,nov,déc',
             'weekdays_short' => 'lu,ma,me,je,ve,sa,di',
             'close' => 'Fermer',
@@ -120,6 +124,8 @@ function fm_strings(): array
             'yesterday' => 'hier %s',
         ],
         'de' => [
+            'copy_link' => 'Link kopieren',
+            'link_copied' => 'Link kopiert',
             'months_short' => 'Jan,Feb,Mär,Apr,Mai,Jun,Jul,Aug,Sep,Okt,Nov,Dez',
             'weekdays_short' => 'Mo,Di,Mi,Do,Fr,Sa,So',
             'close' => 'Schließen',
@@ -173,6 +179,8 @@ function fm_strings(): array
             'yesterday' => 'gestern %s',
         ],
         'en' => [
+            'copy_link' => 'Copy link',
+            'link_copied' => 'Link copied',
             'months_short' => 'Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec',
             'weekdays_short' => 'Mo,Tu,We,Th,Fr,Sa,Su',
             'close' => 'Close',

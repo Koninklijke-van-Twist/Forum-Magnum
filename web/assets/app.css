@@ -221,3 +221,6 @@ form.inline { display: inline; }
 .thread.is-unread .thread-title { color: var(--accent); }
 .post.is-unread { border-color: #6ea8ec; box-shadow: 0 0 0 1px #6ea8ec; }
 .post.first-unread { box-shadow: 0 0 0 2px #1f5fa8; }
+/* Korte bevestiging (bv. 'Link gekopieerd') */
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 100; background: #14202e; color: #fff; padding: 8px 14px; border-radius: 8px; font-size: .9rem; box-shadow: 0 6px 20px rgba(0,0,0,.25); transition: opacity .3s; pointer-events: none; }
+.toast.hide { opacity: 0; }

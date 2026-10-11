@@ -101,18 +101,18 @@ foreach ($posts as $post) {
     echo '<article class="post' . ($postId === $anchor ? ' first-unread' : '') . ($postId > $lastReadBefore && !$deleted ? ' is-unread' : '') . ($deleted ? ' is-deleted' : '') . '" id="p' . $postId . '">'
         . fm_poster_html((string) $post['author'])
         . '<div class="post-main">';
-    if (($canEdit && $editId !== $postId) || $canDelete) {
-        echo '<details class="post-menu"><summary title="' . h(fm_t('menu')) . '" aria-label="' . h(fm_t('menu')) . '">⋯</summary><div class="post-menu-list">';
-        if ($canEdit && $editId !== $postId) {
-            echo '<a href="' . h('thread.php?' . http_build_query(['id' => $threadId, 'p' => $page, 'edit' => $postId]) . '#p' . $postId) . '">' . h(fm_t('edit')) . '</a>';
-        }
-        if ($canDelete) {
-            echo '<form method="post" data-confirm="' . h(fm_t('confirm_delete')) . '">' . fm_csrf_field()
-                . '<input type="hidden" name="action" value="delete"><input type="hidden" name="post" value="' . $postId . '">'
-                . '<button type="submit" class="danger">' . h(fm_t('delete')) . '</button></form>';
-        }
-        echo '</div></details>';
+    // Menu op elk bericht: 'Kopieer link' voor iedereen (ook verwijderd), bewerken/verwijderen alleen waar toegestaan.
+    echo '<details class="post-menu"><summary title="' . h(fm_t('menu')) . '" aria-label="' . h(fm_t('menu')) . '">⋯</summary><div class="post-menu-list">'
+        . '<button type="button" data-copy-link="' . h('post.php?id=' . $postId) . '" data-copied="' . h(fm_t('link_copied')) . '">' . h(fm_t('copy_link')) . '</button>';
+    if ($canEdit && $editId !== $postId) {
+        echo '<a href="' . h('thread.php?' . http_build_query(['id' => $threadId, 'p' => $page, 'edit' => $postId]) . '#p' . $postId) . '">' . h(fm_t('edit')) . '</a>';
     }
+    if ($canDelete) {
+        echo '<form method="post" data-confirm="' . h(fm_t('confirm_delete')) . '">' . fm_csrf_field()
+            . '<input type="hidden" name="action" value="delete"><input type="hidden" name="post" value="' . $postId . '">'
+            . '<button type="submit" class="danger">' . h(fm_t('delete')) . '</button></form>';
+    }
+    echo '</div></details>';
     if ($deleted) {
         echo '<div class="post-body deleted">' . h(fm_t('deleted_post')) . '</div>';
     } elseif ($canEdit && $editId === $postId) {
