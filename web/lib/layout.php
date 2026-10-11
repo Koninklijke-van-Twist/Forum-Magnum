@@ -227,22 +227,37 @@ function fm_section_label(string $section): string
     return fm_t('sec_' . $section);
 }
 
-/** Posterblok: avatar, naam + functie, e-mail, afdeling; kleur uit de afdeling. */
+/**
+ * Bedrijfslogo als monochroom icoon (CSS-mask over het SVG-bestand): wit voor iedereen,
+ * glimmend goud voor beheerders.
+ */
+function fm_company_logo_html(string $email, string $company): string
+{
+    $key = fm_company_logo_key($email, $company);
+    $admin = fm_is_admin($email);
+    $label = $company !== '' ? $company : $key;
+    if ($admin) {
+        $label .= ' · ' . fm_t('admin');
+    }
+    $url = 'assets/company/' . $key . '.svg?v=' . (int) @filemtime(__DIR__ . '/../assets/company/' . $key . '.svg');
+
+    return '<span class="company-logo' . ($admin ? ' is-admin' : '') . '" role="img" aria-label="' . h($label) . '" title="' . h($label) . '"'
+        . ' style="' . h('-webkit-mask-image:url("' . $url . '");mask-image:url("' . $url . '")') . '"></span>';
+}
+
+/** Posterblok: bedrijfslogo + avatar, naam, e-mail, afdeling; kleur uit de afdeling. */
 function fm_poster_html(string $email): string
 {
     $info = fm_user_info($email);
     $color = fm_department_color($info['department']);
     $style = '--poster-bg:' . $color['bg'] . ';--poster-fg:' . $color['fg'] . ';--poster-soft:' . $color['soft'];
-    $badge = fm_is_admin($email)
-        ? '<img class="admin-badge" src="assets/admin-badge.svg" alt="' . h(fm_t('admin')) . '" title="' . h(fm_t('admin')) . '" width="22" height="22">'
-        : '';
 
     return '<aside class="poster" style="' . h($style) . '">'
-        . '<div class="poster-avatar"><img src="' . h(fm_avatar_url($email)) . '" alt="" loading="lazy">' . $badge . '</div>'
+        . '<div class="poster-top">' . fm_company_logo_html($email, $info['company'])
+        . '<img class="poster-avatar" src="' . h(fm_avatar_url($email)) . '" alt="" loading="lazy" width="90" height="90"></div>'
         . '<div class="poster-id"><strong class="poster-name">' . h($info['name']) . '</strong>'
         . ($info['job_title'] !== '' ? '<span class="poster-title">' . h($info['job_title']) . '</span>' : '')
-        . '</div>'
-        . '<a class="poster-mail" href="mailto:' . h($email) . '">' . h($email) . '</a>'
+        . '<a class="poster-mail" href="mailto:' . h($email) . '">' . h($email) . '</a></div>'
         . '<span class="poster-dept">' . h(implode(' · ', array_filter([$info['department'], $info['company']]))) . '</span>'
         . '</aside>';
 }

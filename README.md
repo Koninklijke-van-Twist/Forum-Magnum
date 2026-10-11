@@ -26,10 +26,24 @@ het logo (`web/thumbnail.png`) is gebleven.
 - Threadlijsten: laatste bericht eerst, ongelezen-indicator.
   Binnen een thread: oudste bovenaan, 50 per pagina. Een thread opent op de pagina met
   je eerste ongelezen bericht (en scrolt ernaartoe), anders op de laatste pagina.
-- Berichtweergave: links een posterblok (avatar, naam + functie, e-mail, afdeling ·
-  bedrijf) in een kleur die deterministisch uit de afdeling volgt (hash → HSL, wit op
-  donkere tint, contrast ≥ 4.5). Op mobiel klapt het blok in tot een balk boven het bericht.
-  Beheerders krijgen `web/assets/admin-badge.svg` (placeholder) bij hun avatar.
+- Berichtweergave: links een compact posterblok (bedrijfslogo linksboven, vierkant avatar
+  van 90px, naam, e-mail, afdeling · bedrijf) in een kleur die deterministisch uit de
+  afdeling volgt (hash → HSL, wit op donkere tint, contrast ≥ 4.5). Onder het bericht staat
+  een voetregel met links de permalink (`#123`, te citeren als `post#123`) en rechts datum
+  en (bewerkt …). Op mobiel klapt het posterblok in tot een balk boven het bericht.
+- Bedrijfslogo: wit voor iedereen, glimmend goud (gradient) voor beheerders.
+
+### Bedrijfslogo toevoegen
+
+1. Zet een SVG in `web/assets/company/<sleutel>.svg` (sleutel: kleine letters, cijfers,
+   `-` of `_`, bv. `hunter.svg`). Het logo wordt als masker gebruikt: alleen de vorm telt,
+   kleuren in het bestand worden genegeerd. Vierkant (bv. `viewBox="0 0 28 28"`) werkt het best.
+2. De koppeling staat in `FM_COMPANY_LOGOS` in `web/lib/users.php`: sleutel => e-maildomeinen
+   en/of bedrijfsnamen (`companyName` uit Entra), bv. `'hunter' => ['hunter.be', 'Hunter']`.
+   Voor kvt, hunter, kvtgermany, nhmr en alistar staat die er al; dan is alleen het
+   SVG-bestand nodig. Extra koppelingen kunnen ook zonder codewijziging in `auth.php`:
+   `$companyLogos = ['voorbeeld' => ['voorbeeld.nl', 'Voorbeeld BV']];`.
+3. Zonder bestand valt een bedrijf terug op het KVT-logo (`kvt.svg`).
 - Berichtopmaak: overgenomen uit Asclepius (`web/lib/markdown.php`): vet/cursief, code,
   codeblokken, lijsten, citaten, tabellen, toetsen (`[Ctrl]`), autodetectie van URL's,
   e-mail en telefoonnummers (URL's, e-mails, markdownlinks en code gaan niet nog eens door
