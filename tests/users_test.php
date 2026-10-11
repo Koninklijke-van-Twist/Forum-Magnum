@@ -75,6 +75,9 @@ check(!str_contains((string) file_get_contents(fm_data_dir() . '/graph_status.js
 // Bedrijfslogo: alleen KVT-logo aanwezig, de rest valt terug op kvt.
 check_same('kvt', fm_company_logo_key('tim@kvt.nl', 'Koninklijke van Twist'), 'logo via companyName');
 check_same('kvt', fm_company_logo_key('jan@hunter.be', 'Hunter'), 'zonder hunter.svg terug naar KVT');
+check_same('vantwistvastgoed', fm_company_logo_key('piet@vantwistvastgoed.nl'), 'Van Twist Vastgoed via domein');
+check_same('vantwistvastgoed', fm_company_logo_key('piet@kvt.nl', 'Van Twist Vastgoed'), 'Van Twist Vastgoed via companyName');
+check_same('Van Twist Vastgoed', fm_company_from_email('piet@vantwistvastgoed.nl'), 'bedrijfsnaam bij domein');
 $tmpLogo = __DIR__ . '/../web/assets/company/testbedrijf.svg';
 file_put_contents($tmpLogo, '<svg xmlns="http://www.w3.org/2000/svg"/>');
 $GLOBALS['companyLogos'] = ['testbedrijf' => ['test.example', 'Test BV'], '../x' => ['kwaad.nl']];

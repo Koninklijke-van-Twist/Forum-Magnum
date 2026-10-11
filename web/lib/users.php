@@ -23,6 +23,7 @@ const FM_COMPANY_DOMAINS = [
     'kvtgermany.de' => 'KVT Germany',
     'nhmr.nl' => 'NHMR',
     'alistar.net' => 'Alistar',
+    'vantwistvastgoed.nl' => 'Van Twist Vastgoed',
 ];
 
 /**
@@ -36,6 +37,7 @@ const FM_COMPANY_LOGOS = [
     'kvtgermany' => ['kvtgermany.de', 'KVT Germany'],
     'nhmr' => ['nhmr.nl', 'NHMR'],
     'alistar' => ['alistar.net', 'Alistar'],
+    'vantwistvastgoed' => ['vantwistvastgoed.nl', 'Van Twist Vastgoed'],
 ];
 const FM_COMPANY_LOGO_FALLBACK = 'kvt';
 
