@@ -187,8 +187,8 @@ form.inline { display: inline; }
 .mention-box li { display: flex; flex-direction: column; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
 .mention-box li span { font-size: .8rem; color: var(--muted); }
 .mention-box li.active, .mention-box li:hover { background: var(--bg); }
-.mention-pop { position: absolute; z-index: 60; width: 220px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
-.mention-pop .poster { border-radius: 10px; display: flex; flex-direction: column; }
+.mention-pop { position: absolute; z-index: 60; width: 240px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+.mention-pop .poster { border-radius: 10px; } /* rij: kaart + afdelingsstrook */
 .mention-pop .poster-mail { display: block; }
 
 /* Meldingen */

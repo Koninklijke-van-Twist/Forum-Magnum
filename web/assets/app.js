@@ -194,7 +194,7 @@ document.addEventListener('submit', function (e) {
                 document.body.appendChild(pop);
                 fitAll(pop);
                 var r = b.getBoundingClientRect();
-                var left = Math.min(window.scrollX + r.left, window.scrollX + document.documentElement.clientWidth - 230);
+                var left = Math.min(window.scrollX + r.left, window.scrollX + document.documentElement.clientWidth - 250);
                 pop.style.left = Math.max(8, left) + 'px';
                 pop.style.top = (window.scrollY + r.bottom + 6) + 'px';
             });
