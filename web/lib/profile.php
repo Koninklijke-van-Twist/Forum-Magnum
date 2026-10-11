@@ -14,6 +14,13 @@ const FM_HEATMAP_GAP = 3;
 const FM_HEATMAP_RADIUS = 2;
 const FM_HEATMAP_GUTTER = 28;
 const FM_HEATMAP_MONTH_BAND = 16;
+const FM_TIMEZONE = 'Europe/Amsterdam'; // zelfde zone als de tijden bij berichten (fm_format_time)
+
+/** "Vandaag" in de forum-tijdzone, los van de PHP-standaardzone van de server. */
+function fm_heatmap_today(): DateTimeImmutable
+{
+    return new DateTimeImmutable('today', new DateTimeZone(FM_TIMEZONE));
+}
 
 /** Maandag (00:00 lokaal) van de eerste week in het venster dat eindigt in de week van $today. */
 function fm_heatmap_start(DateTimeImmutable $today, int $weeks = FM_HEATMAP_WEEKS): DateTimeImmutable
@@ -35,8 +42,9 @@ function fm_post_day_counts(string $email, int $from, ?int $to = null): array
         WHERE author = ? AND deleted_at IS NULL AND created_at >= ? AND created_at < ? GROUP BY created_at / 3600');
     $st->execute([strtolower($email), $from, $to ?? PHP_INT_MAX]);
     $days = [];
+    $tz = new DateTimeZone(FM_TIMEZONE);
     foreach ($st->fetchAll() as $row) {
-        $key = date('Y-m-d', (int) $row['hour'] * 3600);
+        $key = (new DateTimeImmutable('@' . ((int) $row['hour'] * 3600)))->setTimezone($tz)->format('Y-m-d');
         $days[$key] = ($days[$key] ?? 0) + (int) $row['n'];
     }
     ksort($days);
@@ -130,7 +138,7 @@ function fm_heatmap_legend_html(): string
 /** Profielmodal-inhoud: volledig posterblok links, heatmap rechts. */
 function fm_profile_html(string $email, ?DateTimeImmutable $today = null): string
 {
-    $today ??= new DateTimeImmutable('today');
+    $today ??= fm_heatmap_today();
     $days = fm_post_day_counts($email, fm_heatmap_start($today)->getTimestamp());
 
     return '<div class="profile" role="document">'

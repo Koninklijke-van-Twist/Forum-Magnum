@@ -16,7 +16,7 @@ if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
     http_response_code(400);
     exit;
 }
-$today = new DateTimeImmutable('today');
+$today = fm_heatmap_today();
 if (isset($_GET['days'])) {
     $from = fm_heatmap_start($today);
     header('Content-Type: application/json; charset=utf-8');

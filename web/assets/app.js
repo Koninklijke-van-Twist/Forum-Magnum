@@ -174,7 +174,7 @@ document.addEventListener('submit', function (e) {
     document.addEventListener('focusout', function (e) { if (e.target === field) { setTimeout(close, 150); } });
 
     /* Profielmodal: klik op een @-vermelding, avatar of naam (data-poster). */
-    var modal = null, opener = null;
+    var modal = null, opener = null, profileSeq = 0;
     function closeModal() { if (modal) { modal.close(); } }
     function cleanupModal() {
         if (modal) { modal.remove(); modal = null; }
@@ -186,10 +186,11 @@ document.addEventListener('submit', function (e) {
         if (!b || (modal && modal.contains(b))) { return; }
         e.preventDefault();
         opener = b;
+        var seq = ++profileSeq; // alleen het antwoord op de laatste klik telt
         fetch('profile.php?u=' + encodeURIComponent(b.getAttribute('data-poster')), { credentials: 'same-origin' })
             .then(function (r) { return r.ok ? r.text() : ''; })
             .then(function (html) {
-                if (!html || !opener) { return; }
+                if (!html || !opener || seq !== profileSeq) { return; }
                 if (modal) { modal.removeEventListener('close', cleanupModal); modal.close(); modal.remove(); }
                 modal = document.createElement('dialog');
                 modal.className = 'profile-modal';

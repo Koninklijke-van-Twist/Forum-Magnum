@@ -4,23 +4,26 @@ declare(strict_types=1);
 
 require __DIR__ . '/_bootstrap.php';
 
-date_default_timezone_set('Europe/Amsterdam');
+date_default_timezone_set('UTC'); // server in UTC: dagen moeten toch in Europe/Amsterdam vallen
 $GLOBALS['forumAdmins'] = ['tfalken@kvt.nl'];
 $GLOBALS['fmLang'] = 'nl';
 
 // Venster: 26 weken, maandag t/m de week van vandaag.
-$today = new DateTimeImmutable('2026-10-14'); // woensdag
+$ams = new DateTimeZone('Europe/Amsterdam');
+$at = static fn (string $t) => (new DateTimeImmutable($t, $ams))->getTimestamp();
+$today = new DateTimeImmutable('2026-10-14', $ams); // woensdag
+check_same('Europe/Amsterdam', fm_heatmap_today()->getTimezone()->getName(), 'vandaag in forum-tijdzone');
 check_same('2026-04-20', fm_heatmap_start($today)->format('Y-m-d'), 'venster begint op maandag, 26 weken terug');
 
 // Dagtellingen: eigen, niet-verwijderde berichten, per lokale dag (ook rond middernacht en zomertijd).
-$t = fm_create_thread('general', 'tfalken@kvt.nl', 'Teller', 'x', strtotime('2026-10-12 23:30'));
-fm_reply($t, 'tfalken@kvt.nl', 'na middernacht', strtotime('2026-10-13 00:10'));
-fm_reply($t, 'tfalken@kvt.nl', 'zelfde dag', strtotime('2026-10-13 09:00'));
-$del = fm_reply($t, 'tfalken@kvt.nl', 'weg', strtotime('2026-10-13 10:00'));
+$t = fm_create_thread('general', 'tfalken@kvt.nl', 'Teller', 'x', $at('2026-10-12 23:30'));
+fm_reply($t, 'tfalken@kvt.nl', 'na middernacht', $at('2026-10-13 00:10'));
+fm_reply($t, 'tfalken@kvt.nl', 'zelfde dag', $at('2026-10-13 09:00'));
+$del = fm_reply($t, 'tfalken@kvt.nl', 'weg', $at('2026-10-13 10:00'));
 fm_delete_post($del, 'tfalken@kvt.nl');
-fm_reply($t, 'anna.jansen@kvt.nl', 'ander', strtotime('2026-10-13 11:00'));
-fm_reply($t, 'tfalken@kvt.nl', 'wintertijd', strtotime('2026-03-29 01:30')); // buiten venster
-fm_reply($t, 'TFalken@kvt.nl', 'zomer', strtotime('2026-06-01 00:30'));
+fm_reply($t, 'anna.jansen@kvt.nl', 'ander', $at('2026-10-13 11:00'));
+fm_reply($t, 'tfalken@kvt.nl', 'wintertijd', $at('2026-03-29 01:30')); // buiten venster
+fm_reply($t, 'TFalken@kvt.nl', 'zomer', $at('2026-06-01 00:30'));
 $days = fm_post_day_counts('tfalken@kvt.nl', fm_heatmap_start($today)->getTimestamp());
 check_same(['2026-06-01' => 1, '2026-10-12' => 1, '2026-10-13' => 2], $days, 'per lokale dag, zonder verwijderde/andermans/buiten venster');
 
