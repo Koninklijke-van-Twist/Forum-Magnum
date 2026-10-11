@@ -14,6 +14,7 @@ function fm_strings(): array
 {
     return [
         'nl' => [
+            'profile' => 'Profiel van %s',
             'sec_announcements' => 'Aankondigingen',
             'sec_work' => 'Werkgerelateerd',
             'sec_general' => 'Algemeen',
@@ -63,6 +64,7 @@ function fm_strings(): array
             'yesterday' => 'gisteren %s',
         ],
         'fr' => [
+            'profile' => 'Profil de %s',
             'sec_announcements' => 'Annonces',
             'sec_work' => 'Travail',
             'sec_general' => 'Général',
@@ -112,6 +114,7 @@ function fm_strings(): array
             'yesterday' => 'hier %s',
         ],
         'de' => [
+            'profile' => 'Profil von %s',
             'sec_announcements' => 'Ankündigungen',
             'sec_work' => 'Arbeit',
             'sec_general' => 'Allgemeines',
@@ -161,6 +164,7 @@ function fm_strings(): array
             'yesterday' => 'gestern %s',
         ],
         'en' => [
+            'profile' => 'Profile of %s',
             'sec_announcements' => 'Announcements',
             'sec_work' => 'Work-related',
             'sec_general' => 'General',

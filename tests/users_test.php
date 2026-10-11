@@ -87,4 +87,17 @@ check_same('kvt', fm_company_logo_key('a@kwaad.nl'), 'ongeldige sleutel genegeer
 unlink($tmpLogo);
 unset($GLOBALS['companyLogos']);
 
+// Posterblok: afdeling in verticale strook (hoofdletters), bedrijf onderaan, geen functie; avatar en naam openen het profiel.
+fm_db()->prepare('INSERT OR REPLACE INTO directory (email, graph_id, name, job_title, department, company, fetched_at) VALUES (?,?,?,?,?,?,?)')
+    ->execute(['strook@kvt.nl', '', 'Sanne <Strook>', 'Monteur', '70 - Service', 'Koninklijke van Twist', time()]);
+$html = fm_poster_html('strook@kvt.nl');
+check(str_contains($html, '<div class="poster-dept" title="70 - Service"><span class="poster-dept-text" data-fit-text>70 - SERVICE</span></div>'), 'afdeling als strook in hoofdletters');
+check(str_contains($html, '<span class="poster-company">Koninklijke van Twist</span>') && str_contains($html, '<span class="poster-meta">70 - Service · Koninklijke van Twist</span>'), 'bedrijf onderaan, mobiele regel afdeling · bedrijf');
+check(!str_contains($html, 'Monteur'), 'functie niet in het posterblok');
+check(substr_count($html, 'class="poster-open') === 2 && substr_count($html, 'data-poster="strook@kvt.nl"') === 2 && str_contains($html, '<button type="button" class="poster-open poster-name" data-poster="strook@kvt.nl"'), 'avatar en naam zijn knoppen naar het profiel');
+check(str_contains($html, '>Sanne &lt;Strook&gt;</button>'), 'naam ge-escaped');
+fm_db()->prepare('INSERT OR REPLACE INTO directory (email, graph_id, name, job_title, department, company, fetched_at) VALUES (?,?,?,?,?,?,?)')
+    ->execute(['geenafd@kvt.nl', 'x', 'Geen Afdeling', '', '', 'Koninklijke van Twist', time()]);
+check(!str_contains(fm_poster_html('geenafd@kvt.nl'), 'poster-dept'), 'zonder afdeling geen strook');
+
 finish('users');
