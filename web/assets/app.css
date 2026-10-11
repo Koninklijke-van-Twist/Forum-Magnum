@@ -75,7 +75,7 @@ form.inline { display: inline; }
 /* Linksboven het bedrijfslogo, rechts daarnaast het vierkante avatar. */
 .poster-top { display: flex; align-items: flex-start; gap: 8px; }
 .poster-avatar { width: 90px; height: 90px; flex: none; object-fit: cover; border-radius: 6px; display: block; background: rgba(255,255,255,.15); }
-.company-logo { width: 22px; height: 22px; flex: none; display: inline-block; background: #fff;
+.company-logo { width: 32px; height: 32px; flex: none; display: inline-block; background: #fff;
     -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-position: center; mask-position: center; }
 /* Beheerder: glimmend goud (lineaire gradient op ~60 graden). */
 .company-logo.is-admin { background: linear-gradient(60deg, #8a6a1f 0%, #f7e08a 30%, #c9972c 55%, #fff3b0 75%, #a8781e 100%); }
@@ -122,7 +122,7 @@ form.inline { display: inline; }
     .post .poster { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "top id" "top dept"; column-gap: 10px; row-gap: 2px; padding: 6px 10px; align-items: center; }
     .post .poster-top { grid-area: top; gap: 6px; }
     .post .poster-avatar { width: 44px; height: 44px; }
-    .post .company-logo { width: 16px; height: 16px; }
+    .post .company-logo { width: 24px; height: 24px; }
     .post .poster-id { grid-area: id; flex-direction: row; flex-wrap: wrap; gap: 0 8px; align-items: baseline; }
     .post .poster-title { display: none; }
     .post .poster-dept { grid-area: dept; border: 0; padding: 0; margin: 0; font-size: .75rem; font-weight: 500; opacity: .9; }
