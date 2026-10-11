@@ -176,7 +176,8 @@ document.addEventListener('submit', function (e) {
     var pop = null;
     function closePop() { if (pop) { pop.remove(); pop = null; } }
     document.addEventListener('click', function (e) {
-        var b = e.target.closest('.mention[data-poster]');
+        var b = e.target.closest('[data-poster]');
+        if (b && pop && pop.contains(b)) { return; }
         if (!b) {
             if (pop && !pop.contains(e.target)) { closePop(); }
             return;
@@ -191,11 +192,32 @@ document.addEventListener('submit', function (e) {
                 pop.className = 'mention-pop';
                 pop.innerHTML = html; // server-side gerenderd en ge-escaped (fm_poster_html)
                 document.body.appendChild(pop);
+                fitAll(pop);
                 var r = b.getBoundingClientRect();
-                var left = Math.min(window.scrollX + r.left, window.scrollX + document.documentElement.clientWidth - 230);
+                var left = Math.min(window.scrollX + r.left, window.scrollX + document.documentElement.clientWidth - 250);
                 pop.style.left = Math.max(8, left) + 'px';
                 pop.style.top = (window.scrollY + r.bottom + 6) + 'px';
             });
     });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closePop(); } });
 })();
+
+/* Tekst op één regel houden: lettergrootte omlaag tot hij past (min 9px), daarna ellipsis. */
+function fitText(el) {
+    el.style.fontSize = '';
+    var size = parseFloat(window.getComputedStyle(el).fontSize);
+    while (size > 9 && (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1)) {
+        size -= 0.5;
+        el.style.fontSize = size + 'px';
+    }
+}
+var fitObserver = 'ResizeObserver' in window ? new ResizeObserver(function (entries) {
+    entries.forEach(function (en) { var t = en.target.querySelector('[data-fit-text]'); if (t) { fitText(t); } });
+}) : null;
+function fitAll(root) {
+    Array.prototype.forEach.call(root.querySelectorAll('[data-fit-text]'), function (el) {
+        fitText(el);
+        if (fitObserver) { fitObserver.observe(el.parentElement); }
+    });
+}
+fitAll(document);

@@ -245,19 +245,30 @@ function fm_company_logo_html(string $email, string $company): string
         . ' style="' . h('-webkit-mask-image:url("' . $url . '");mask-image:url("' . $url . '")') . '"></span>';
 }
 
-/** Posterblok: bedrijfslogo + avatar, naam, e-mail, afdeling; kleur uit de afdeling. */
+/**
+ * Posterblok: bedrijfslogo + avatar, naam, e-mail en bedrijf; de afdeling staat in een
+ * verticale strook rechts (op mobiel als regel onder de naam). Kleur uit de afdeling.
+ * Avatar en naam openen het profiel (data-poster).
+ */
 function fm_poster_html(string $email): string
 {
     $info = fm_user_info($email);
     $color = fm_department_color($info['department']);
     $style = '--poster-bg:' . $color['bg'] . ';--poster-fg:' . $color['fg'] . ';--poster-soft:' . $color['soft'];
+    $profile = h(fm_t('profile', $info['name']));
+    $dept = trim($info['department']);
 
     return '<aside class="poster" style="' . h($style) . '">'
+        . '<div class="poster-card">'
         . '<div class="poster-top">' . fm_company_logo_html($email, $info['company'])
-        . '<img class="poster-avatar" src="' . h(fm_avatar_url($email)) . '" alt="" loading="lazy" width="90" height="90"></div>'
-        . '<div class="poster-id"><strong class="poster-name">' . h($info['name']) . '</strong>'
-        . ($info['job_title'] !== '' ? '<span class="poster-title">' . h($info['job_title']) . '</span>' : '')
+        . '<button type="button" class="poster-open poster-avatar-btn" data-poster="' . h($email) . '" aria-label="' . $profile . '">'
+        . '<img class="poster-avatar" src="' . h(fm_avatar_url($email)) . '" alt="" loading="lazy" width="90" height="90"></button></div>'
+        . '<div class="poster-id"><button type="button" class="poster-open poster-name" data-poster="' . h($email) . '" title="' . $profile . '">' . h($info['name']) . '</button>'
         . '<a class="poster-mail" href="mailto:' . h($email) . '">' . h($email) . '</a></div>'
-        . '<span class="poster-dept">' . h(implode(' · ', array_filter([$info['department'], $info['company']]))) . '</span>'
+        . ($info['company'] !== '' ? '<span class="poster-company">' . h($info['company']) . '</span>' : '')
+        . '</div>'
+        // Mobiel: afdeling · bedrijf als regel onder de naam (zoals voorheen); desktop: verticale strook.
+        . '<span class="poster-meta">' . h(implode(' · ', array_filter([$dept, $info['company']]))) . '</span>'
+        . ($dept !== '' ? '<div class="poster-dept" title="' . h($dept) . '"><span class="poster-dept-text" data-fit-text>' . h(mb_strtoupper($dept)) . '</span></div>' : '')
         . '</aside>';
 }

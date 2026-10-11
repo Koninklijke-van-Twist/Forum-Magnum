@@ -66,12 +66,23 @@ form.inline { display: inline; }
 .reply { margin-top: 16px; }
 
 .posts { display: flex; flex-direction: column; gap: 14px; }
-.post { display: grid; grid-template-columns: 200px minmax(0, 1fr); background: var(--card); border: 1px solid var(--line); border-radius: 10px; scroll-margin-top: 64px; }
+.post { display: grid; grid-template-columns: 226px minmax(0, 1fr); background: var(--card); border: 1px solid var(--line); border-radius: 10px; scroll-margin-top: 64px; }
 /* Geen overflow:hidden op .post (dat knipt het ⋯-menu af); de kinderen krijgen zelf de hoeken. */
 .post > .poster { border-radius: 9px 0 0 9px; }
 .post > .post-main { border-radius: 0 9px 9px 0; }
 .post.first-unread { box-shadow: 0 0 0 2px #d93025; }
-.poster { background: var(--poster-bg); color: var(--poster-fg); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.poster { background: var(--poster-bg); color: var(--poster-fg); display: flex; min-width: 0; }
+.poster-card { flex: 1; min-width: 0; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+/* Afdeling: verticale strook rechts, leest van onder naar boven, altijd één regel (app.js verkleint zo nodig). */
+.poster-dept { flex: none; width: 28px; contain: size; padding: 10px 0; border-left: 1px solid rgba(255,255,255,.3); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.poster-dept-text { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-height: 100%; font-size: 1rem; line-height: 1; letter-spacing: .06em; }
+.poster-meta { display: none; }
+.poster-company { margin-top: auto; padding-top: 6px; border-top: 1px solid rgba(255,255,255,.3); font-size: .8rem; font-weight: 600; letter-spacing: .02em; }
+/* Avatar en naam openen het profiel; naam ziet eruit als gewone tekst. */
+.poster-open { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; border-radius: 6px; }
+.poster-open:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.poster-avatar-btn { flex: none; display: block; }
+.poster-name:hover { text-decoration: underline; }
 /* Linksboven het bedrijfslogo, rechts daarnaast het vierkante avatar. */
 .poster-top { display: flex; align-items: flex-start; gap: 8px; }
 .poster-avatar { width: 90px; height: 90px; flex: none; object-fit: cover; border-radius: 6px; display: block; background: rgba(255,255,255,.15); }
@@ -80,10 +91,8 @@ form.inline { display: inline; }
 /* Beheerder: glimmend goud (lineaire gradient op ~60 graden). */
 .company-logo.is-admin { background: linear-gradient(60deg, #8a6a1f 0%, #f7e08a 30%, #c9972c 55%, #fff3b0 75%, #a8781e 100%); }
 .poster-id { display: flex; flex-direction: column; min-width: 0; }
-.poster-name { font-size: 1rem; line-height: 1.2; overflow-wrap: anywhere; }
-.poster-title { font-size: .78rem; opacity: .9; }
+.poster-name { font-size: 1rem; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
 .poster-mail { color: var(--poster-fg); font-size: .72rem; opacity: .85; overflow-wrap: anywhere; }
-.poster-dept { margin-top: auto; padding-top: 6px; border-top: 1px solid rgba(255,255,255,.3); font-size: .8rem; font-weight: 600; letter-spacing: .02em; }
 .post-main { position: relative; padding: 12px 16px 0; min-width: 0; display: flex; flex-direction: column; background: linear-gradient(var(--card), var(--card)); }
 /* Voetregel onderaan het bericht: permalink links, datum/bewerkt rechts. */
 .post-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin: 10px -16px 0; padding: 4px 10px 5px; border-top: 1px solid var(--line); color: var(--muted); font-size: .78rem; }
@@ -120,12 +129,13 @@ form.inline { display: inline; }
     .post > .post-main { border-radius: 0 0 9px 9px; }
     /* Compact: logo + avatar links, naam/e-mail en afdeling ernaast. Alleen in berichten, niet in de mention-popover. */
     .post .poster { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "top id" "top dept"; column-gap: 10px; row-gap: 2px; padding: 6px 10px; align-items: center; }
+    .post .poster-card { display: contents; }
+    .post .poster-company, .post .poster-dept { display: none; }
     .post .poster-top { grid-area: top; gap: 6px; }
     .post .poster-avatar { width: 44px; height: 44px; }
     .post .company-logo { width: 24px; height: 24px; }
     .post .poster-id { grid-area: id; flex-direction: row; flex-wrap: wrap; gap: 0 8px; align-items: baseline; }
-    .post .poster-title { display: none; }
-    .post .poster-dept { grid-area: dept; border: 0; padding: 0; margin: 0; font-size: .75rem; font-weight: 500; opacity: .9; }
+    .post .poster-meta { display: block; grid-area: dept; font-size: .75rem; font-weight: 500; opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .post-main { padding: 10px 12px 0; }
     .post-foot { margin: 8px -12px 0; padding: 4px 8px; }
     .lang-big { grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -177,8 +187,8 @@ form.inline { display: inline; }
 .mention-box li { display: flex; flex-direction: column; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
 .mention-box li span { font-size: .8rem; color: var(--muted); }
 .mention-box li.active, .mention-box li:hover { background: var(--bg); }
-.mention-pop { position: absolute; z-index: 60; width: 220px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
-.mention-pop .poster { border-radius: 10px; display: flex; flex-direction: column; }
+.mention-pop { position: absolute; z-index: 60; width: 240px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+.mention-pop .poster { border-radius: 10px; } /* rij: kaart + afdelingsstrook */
 .mention-pop .poster-mail { display: block; }
 
 /* Meldingen */
