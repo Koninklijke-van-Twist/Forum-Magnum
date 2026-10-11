@@ -17,14 +17,38 @@ check_same('?', fm_initials(''), 'lege naam');
 // Kleur: deterministisch, verschillend per afdeling, contrast met wit >= 4.5.
 check_same(fm_department_color('ICT'), fm_department_color(' ict '), 'deterministisch, hoofdletterongevoelig');
 check(fm_department_color('ICT')['bg'] !== fm_department_color('Verkoop')['bg'], 'andere afdeling, andere kleur');
-foreach (['ICT', 'Verkoop', 'Service', 'Financiën', 'Werkplaats', 'HR', 'Inkoop', 'Directie', 'Logistiek', 'Engineering', ''] as $dept) {
-    preg_match('/hsl\((\d+), (\d+)%, (\d+)%\)/', fm_department_color($dept)['bg'], $m);
-    check(fm_contrast_with_white((int) $m[1], (int) $m[2], (int) $m[3]) >= 4.5, "contrast wit op afdeling '$dept'");
+// Echte pastels: lichte achtergrond, donkere tekst/logo in dezelfde hue, contrast >= 4.5:1 (ook op het initialen-vlak).
+$depts = ['ICT', 'Verkoop', 'Service', 'Financiën', 'Werkplaats', 'HR', 'Inkoop', 'Directie', 'Logistiek', 'Engineering', '70 - Service',
+    '21 - Engineering & Werkvoorbereiding', 'Projecten', 'Beheer', 'Magazijn', 'Kwaliteit', 'Planning', 'Montage', 'Marketing', 'Juridisch', ''];
+for ($i = 0; $i < 200; $i++) {
+    $depts[] = 'Afdeling ' . $i;
 }
-for ($hue = 0; $hue < 360; $hue += 5) {
-    $light = ($hue >= 40 && $hue <= 200) ? 28 : 36;
-    check(fm_contrast_with_white($hue, 64, $light) >= 4.5, "contrast hue $hue");
+$parse = static function (string $c): array {
+    preg_match('/hsl\((\d+), (\d+)%, (\d+)%\)/', $c, $m);
+    return [(int) $m[1], (int) $m[2], (int) $m[3]];
+};
+$bad = [];
+foreach ($depts as $dept) {
+    $c = fm_department_color($dept);
+    [$bg, $fg, $av] = [$parse($c['bg']), $parse($c['fg']), $parse($c['avatar'])];
+    if (fm_contrast_hsl($fg, $bg) < 4.5 || fm_contrast_hsl($fg, $av) < 4.5) {
+        $bad[] = "$dept: contrast";
+    }
+    if ($bg[2] < 80 || $fg[2] > 25 || $fg[0] !== $bg[0]) {
+        $bad[] = "$dept: geen pastel/donkere tint van dezelfde hue";
+    }
 }
+check_same([], $bad, 'pastel + contrast >= 4.5 voor ' . count($depts) . ' afdelingen');
+for ($hue = 0; $hue < 360; $hue++) {
+    foreach ([45, 60] as $sat) {
+        $l = fm_pastel_fg_light($hue, $sat, [[$hue, $sat, 86], [$hue, $sat, 76]]);
+        if (fm_contrast_hsl([$hue, $sat, $l], [$hue, $sat, 76]) < 4.5 || $l < 15) {
+            $bad[] = "$hue/$sat";
+        }
+    }
+}
+check_same([], $bad, 'per hue een donkere tint (l 15-25%) met voldoende contrast');
+check(abs(fm_contrast_hsl([0, 0, 100], [0, 0, 0]) - 21) < 0.01, 'contrastformule: wit/zwart = 21');
 
 // Met Graph (gemockt): gebruikersinfo + foto 403 => initialen en status.
 $GLOBALS['graphCredentials'] = ['tenantId' => 't', 'clientId' => 'c', 'clientSecret' => 's'];

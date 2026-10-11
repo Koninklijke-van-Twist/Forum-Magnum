@@ -347,20 +347,41 @@ function fm_initials(string $name): string
 function fm_department_color(string $department): array
 {
     $key = mb_strtolower(trim($department));
-    if ($key === '') {
-        return ['bg' => 'hsl(215, 15%, 38%)', 'fg' => '#ffffff', 'soft' => 'hsl(215, 20%, 95%)', 'hue' => 215];
-    }
-    $hash = hexdec(substr(hash('sha256', $key), 0, 8));
-    $hue = $hash % 360;
-    $sat = 45 + ($hash >> 9) % 20;     // 45-64%
-    // Geel/groen is licht van zichzelf: daar donkerder om contrast met wit te houden.
-    $light = ($hue >= 40 && $hue <= 200) ? 28 : 36;
+    $hash = $key === '' ? 0 : hexdec(substr(hash('sha256', $key), 0, 8));
+    $hue = $key === '' ? 215 : $hash % 360;
+    // Echte pastels (light mode): lichte achtergrond, tekst en bedrijfslogo in een donkere tint
+    // van dezelfde kleur. Contrast >= 4.5:1 is gegarandeerd (fm_pastel_fg zoekt de lichtste tint die voldoet).
+    $sat = $key === '' ? 18 : 45 + ($hash >> 9) % 16;    // 45-60%
+    $bg = [$hue, $sat, 86];
+    $avatar = [$hue, $sat, 76];                            // initialen-vlak iets dieper dan het blok
+    $fg = [$hue, min(60, $sat), fm_pastel_fg_light($hue, min(60, $sat), [$bg, $avatar])];
+    $hsl = static fn (array $c) => 'hsl(' . $c[0] . ', ' . $c[1] . '%, ' . $c[2] . '%)';
 
-    return ['bg' => "hsl($hue, {$sat}%, {$light}%)", 'fg' => '#ffffff', 'soft' => "hsl($hue, 40%, 95%)", 'hue' => $hue];
+    return ['bg' => $hsl($bg), 'fg' => $hsl($fg), 'avatar' => $hsl($avatar), 'line' => 'hsla(' . $hue . ', ' . $fg[1] . '%, ' . $fg[2] . '%, .25)',
+        'soft' => "hsl($hue, 40%, 95%)", 'hue' => $hue];
 }
 
-/** Relatieve luminantie-contrast van wit tegen een HSL-kleur (voor de tests). */
-function fm_contrast_with_white(int $h, int $s, int $l): float
+/** Lichtste donkere tint (l <= 25%) van hue/sat met contrast >= 4.5:1 op alle opgegeven achtergronden. */
+function fm_pastel_fg_light(int $hue, int $sat, array $backgrounds): int
+{
+    for ($l = 25; $l > 5; $l--) {
+        $ok = true;
+        foreach ($backgrounds as $bg) {
+            if (fm_contrast_hsl([$hue, $sat, $l], $bg) < 4.5) {
+                $ok = false;
+                break;
+            }
+        }
+        if ($ok) {
+            return $l;
+        }
+    }
+
+    return 5;
+}
+
+/** Relatieve luminantie (WCAG) van een HSL-kleur. */
+function fm_hsl_luminance(int $h, int $s, int $l): float
 {
     $s /= 100;
     $l /= 100;
@@ -368,7 +389,21 @@ function fm_contrast_with_white(int $h, int $s, int $l): float
     $a = $s * min($l, 1 - $l);
     $f = static fn ($n) => $l - $a * max(-1, min($k($n) - 3, 9 - $k($n), 1));
     $lin = static fn ($c) => $c <= 0.03928 ? $c / 12.92 : (($c + 0.055) / 1.055) ** 2.4;
-    $lum = 0.2126 * $lin($f(0)) + 0.7152 * $lin($f(8)) + 0.0722 * $lin($f(4));
 
-    return 1.05 / ($lum + 0.05);
+    return 0.2126 * $lin($f(0)) + 0.7152 * $lin($f(8)) + 0.0722 * $lin($f(4));
+}
+
+/** WCAG-contrast tussen twee HSL-kleuren [h, s, l]. */
+function fm_contrast_hsl(array $a, array $b): float
+{
+    $la = fm_hsl_luminance(...$a);
+    $lb = fm_hsl_luminance(...$b);
+
+    return (max($la, $lb) + 0.05) / (min($la, $lb) + 0.05);
+}
+
+/** Contrast van wit tegen een HSL-kleur. */
+function fm_contrast_with_white(int $h, int $s, int $l): float
+{
+    return 1.05 / (fm_hsl_luminance($h, $s, $l) + 0.05);
 }
