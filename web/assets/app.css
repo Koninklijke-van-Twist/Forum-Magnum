@@ -138,7 +138,7 @@ form.inline { display: inline; }
     .post .poster-avatar { width: 44px; height: 44px; }
     .post .company-logo { width: 24px; height: 24px; }
     .post .poster-id { grid-area: id; flex-direction: row; flex-wrap: wrap; gap: 0 8px; align-items: baseline; }
-    .post .poster-meta { display: block; grid-area: dept; font-size: .75rem; font-weight: 500; opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .post .poster-meta { display: block; grid-area: dept; font-size: .75rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .post-main { padding: 10px 12px 0; }
     .post-foot { margin: 8px -12px 0; padding: 4px 8px; }
     .lang-big { grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -194,7 +194,7 @@ form.inline { display: inline; }
 .profile-modal { border: 0; padding: 0; background: none; max-width: min(980px, calc(100vw - 24px)); width: max-content; overflow: visible; }
 .profile-modal::backdrop { background: rgba(15, 23, 42, .45); }
 .profile { position: relative; box-shadow: 0 16px 48px rgba(0,0,0,.3); }
-.profile .poster-title { font-size: .8rem; opacity: .9; }
+.profile .poster-title { font-size: .8rem; }
 .profile-main { padding: 14px 16px; justify-content: center; gap: 8px; }
 .heatmap { overflow-x: auto; padding: 4px 0; }
 .heatmap-svg { display: block; overflow: visible; }
