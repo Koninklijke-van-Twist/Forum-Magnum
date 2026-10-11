@@ -14,6 +14,9 @@ function fm_strings(): array
 {
     return [
         'nl' => [
+            'months_short' => 'jan,feb,mrt,apr,mei,jun,jul,aug,sep,okt,nov,dec',
+            'weekdays_short' => 'ma,di,wo,do,vr,za,zo',
+            'close' => 'Sluiten',
             'profile' => 'Profiel van %s',
             'sec_announcements' => 'Aankondigingen',
             'sec_work' => 'Werkgerelateerd',
@@ -64,6 +67,9 @@ function fm_strings(): array
             'yesterday' => 'gisteren %s',
         ],
         'fr' => [
+            'months_short' => 'janv,févr,mars,avr,mai,juin,juil,août,sept,oct,nov,déc',
+            'weekdays_short' => 'lu,ma,me,je,ve,sa,di',
+            'close' => 'Fermer',
             'profile' => 'Profil de %s',
             'sec_announcements' => 'Annonces',
             'sec_work' => 'Travail',
@@ -114,6 +120,9 @@ function fm_strings(): array
             'yesterday' => 'hier %s',
         ],
         'de' => [
+            'months_short' => 'Jan,Feb,Mär,Apr,Mai,Jun,Jul,Aug,Sep,Okt,Nov,Dez',
+            'weekdays_short' => 'Mo,Di,Mi,Do,Fr,Sa,So',
+            'close' => 'Schließen',
             'profile' => 'Profil von %s',
             'sec_announcements' => 'Ankündigungen',
             'sec_work' => 'Arbeit',
@@ -164,6 +173,9 @@ function fm_strings(): array
             'yesterday' => 'gestern %s',
         ],
         'en' => [
+            'months_short' => 'Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec',
+            'weekdays_short' => 'Mo,Tu,We,Th,Fr,Sa,Su',
+            'close' => 'Close',
             'profile' => 'Profile of %s',
             'sec_announcements' => 'Announcements',
             'sec_work' => 'Work-related',

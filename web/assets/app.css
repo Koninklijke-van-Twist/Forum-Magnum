@@ -66,10 +66,10 @@ form.inline { display: inline; }
 .reply { margin-top: 16px; }
 
 .posts { display: flex; flex-direction: column; gap: 14px; }
-.post { display: grid; grid-template-columns: 226px minmax(0, 1fr); background: var(--card); border: 1px solid var(--line); border-radius: 10px; scroll-margin-top: 64px; }
+.post, .profile { display: grid; grid-template-columns: 226px minmax(0, 1fr); background: var(--card); border: 1px solid var(--line); border-radius: 10px; scroll-margin-top: 64px; }
 /* Geen overflow:hidden op .post (dat knipt het ⋯-menu af); de kinderen krijgen zelf de hoeken. */
-.post > .poster { border-radius: 9px 0 0 9px; }
-.post > .post-main { border-radius: 0 9px 9px 0; }
+.post > .poster, .profile > .poster { border-radius: 9px 0 0 9px; }
+.post > .post-main, .profile > .post-main { border-radius: 0 9px 9px 0; }
 .post.first-unread { box-shadow: 0 0 0 2px #d93025; }
 .poster { background: var(--poster-bg); color: var(--poster-fg); display: flex; min-width: 0; }
 .poster-card { flex: 1; min-width: 0; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
@@ -130,7 +130,7 @@ form.inline { display: inline; }
     .post { grid-template-columns: 1fr; }
     .post > .poster { border-radius: 9px 9px 0 0; }
     .post > .post-main { border-radius: 0 0 9px 9px; }
-    /* Compact: logo + avatar links, naam/e-mail en afdeling ernaast. Alleen in berichten, niet in de mention-popover. */
+    /* Compact: logo + avatar links, naam/e-mail en afdeling ernaast. Alleen in berichten, niet in het profiel. */
     .post .poster { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "top id" "top dept"; column-gap: 10px; row-gap: 2px; padding: 6px 10px; align-items: center; }
     .post .poster-card { display: contents; }
     .post .poster-company, .post .poster-dept { display: none; }
@@ -190,9 +190,25 @@ form.inline { display: inline; }
 .mention-box li { display: flex; flex-direction: column; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
 .mention-box li span { font-size: .8rem; color: var(--muted); }
 .mention-box li.active, .mention-box li:hover { background: var(--bg); }
-.mention-pop { position: absolute; z-index: 60; width: 240px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
-.mention-pop .poster { border-radius: 10px; } /* rij: kaart + afdelingsstrook */
-.mention-pop .poster-mail { display: block; }
+/* Profielmodal: ziet eruit als een post, posterblok links, heatmap rechts. */
+.profile-modal { border: 0; padding: 0; background: none; max-width: min(980px, calc(100vw - 24px)); width: max-content; overflow: visible; }
+.profile-modal::backdrop { background: rgba(15, 23, 42, .45); }
+.profile { position: relative; box-shadow: 0 16px 48px rgba(0,0,0,.3); }
+.profile .poster-title { font-size: .8rem; opacity: .9; }
+.profile-main { padding: 14px 16px; justify-content: center; gap: 8px; }
+.heatmap { overflow-x: auto; padding: 4px 0; }
+.heatmap-svg { display: block; overflow: visible; }
+.heatmap-legend { display: flex; gap: 6px; justify-content: flex-end; }
+.heatmap-legend span { width: 12px; height: 12px; border-radius: 2px; border: 1px solid rgba(0,0,0,.04); }
+.profile-close { position: absolute; top: 4px; right: 8px; border: 0; background: none; font-size: 1.4rem; line-height: 1; color: var(--muted); cursor: pointer; padding: 2px 6px; border-radius: 6px; }
+.profile-close:hover { background: var(--bg); color: var(--text); }
+@media (max-width: 700px) {
+    .profile-modal { width: calc(100vw - 16px); max-width: none; }
+    .profile { grid-template-columns: 1fr; }
+    .profile > .poster { border-radius: 9px 9px 0 0; }
+    .profile > .post-main { border-radius: 0 0 9px 9px; }
+    .profile-close { color: #fff; }
+}
 
 /* Meldingen */
 .bell { position: relative; font-size: 1.15rem; line-height: 1; text-decoration: none; }

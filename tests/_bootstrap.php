@@ -20,6 +20,7 @@ require_once $web . '/store.php';
 require_once $web . '/attachments.php';
 require_once $web . '/users.php';
 require_once $web . '/mentions.php';
+require_once $web . '/profile.php';
 require_once $web . '/markdown.php';
 require_once $web . '/layout.php';
 

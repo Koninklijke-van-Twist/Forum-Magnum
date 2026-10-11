@@ -273,6 +273,13 @@ check_same(1, count(glob($data . '/files/*/*/*') ?: []), 'gedeeld bestand blijft
 $json = json_decode($body, true);
 check_same(200, $s, 'people.php laadt');
 check(is_array($json) && in_array('tfalken:kvt', array_column($json, 'id'), true) && !isset($json[0]['email']), 'dropdown-suggesties (zonder e-mail)');
+[$s, $body, $hdr] = $U('GET', 'profile.php?u=tfalken%40kvt.nl');
+check_same(200, $s, 'profiel laadt');
+check(str_contains($body, '<div class="profile" role="document">') && str_contains($body, 'class="poster poster-full"') && str_contains($body, '<svg class="heatmap-svg"'), 'profielmodal: posterblok + heatmap');
+check_same(400, $U('GET', 'profile.php?u=geen')[0], 'profiel: ongeldig adres');
+[$s, $body, $hdr] = $U('GET', 'profile.php?u=anna.jansen%40kvt.nl&days=1');
+$jd = json_decode($body, true);
+check(stripos($hdr, 'application/json') !== false && is_array($jd['days'] ?? null) && array_sum($jd['days']) >= 1 && isset($jd['from'], $jd['to']), 'dagtellingen-API');
 [$s, $body] = $U('GET', 'people.php?poster=tfalken%40kvt.nl');
 check(str_contains($body, 'class="poster"') && str_contains($body, 'company-logo is-admin'), 'posterblok bij klik op mention');
 [$s, $body] = $U('GET', 'people.php?poster=anna.jansen%40kvt.nl');

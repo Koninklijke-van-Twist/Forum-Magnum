@@ -251,20 +251,25 @@ function fm_company_logo_html(string $email, string $company): string
  * verticale strook rechts (op mobiel als regel onder de naam). Kleur uit de afdeling.
  * Avatar en naam openen het profiel (data-poster).
  */
-function fm_poster_html(string $email): string
+function fm_poster_html(string $email, bool $full = false): string
 {
     $info = fm_user_info($email);
     $color = fm_department_color($info['department']);
     $style = '--poster-bg:' . $color['bg'] . ';--poster-fg:' . $color['fg'] . ';--poster-line:' . $color['line'] . ';--poster-soft:' . $color['soft'];
     $profile = h(fm_t('profile', $info['name']));
     $dept = trim($info['department']);
+    // In het profiel zelf (volledig) zijn avatar en naam geen knop meer en staat de functie erbij.
+    $avatar = '<img class="poster-avatar" src="' . h(fm_avatar_url($email)) . '" alt="" loading="lazy" width="90" height="90">';
+    $avatar = $full ? $avatar : '<button type="button" class="poster-open poster-avatar-btn" data-poster="' . h($email) . '" aria-label="' . $profile . '">' . $avatar . '</button>';
+    $name = $full
+        ? '<strong class="poster-name">' . h($info['name']) . '</strong>'
+        : '<button type="button" class="poster-open poster-name" data-poster="' . h($email) . '" title="' . $profile . '">' . h($info['name']) . '</button>';
 
-    return '<aside class="poster" style="' . h($style) . '">'
+    return '<aside class="poster' . ($full ? ' poster-full' : '') . '" style="' . h($style) . '">'
         . '<div class="poster-card">'
-        . '<div class="poster-top">' . fm_company_logo_html($email, $info['company'])
-        . '<button type="button" class="poster-open poster-avatar-btn" data-poster="' . h($email) . '" aria-label="' . $profile . '">'
-        . '<img class="poster-avatar" src="' . h(fm_avatar_url($email)) . '" alt="" loading="lazy" width="90" height="90"></button></div>'
-        . '<div class="poster-id"><button type="button" class="poster-open poster-name" data-poster="' . h($email) . '" title="' . $profile . '">' . h($info['name']) . '</button>'
+        . '<div class="poster-top">' . fm_company_logo_html($email, $info['company']) . $avatar . '</div>'
+        . '<div class="poster-id">' . $name
+        . ($full && $info['job_title'] !== '' ? '<span class="poster-title">' . h($info['job_title']) . '</span>' : '')
         . '<a class="poster-mail" href="mailto:' . h($email) . '">' . h($email) . '</a></div>'
         . ($info['company'] !== '' ? '<span class="poster-company">' . h($info['company']) . '</span>' : '')
         . '</div>'
