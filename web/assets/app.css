@@ -71,18 +71,25 @@ form.inline { display: inline; }
 .post > .poster { border-radius: 9px 0 0 9px; }
 .post > .post-main { border-radius: 0 9px 9px 0; }
 .post.first-unread { box-shadow: 0 0 0 2px #d93025; }
-.poster { background: var(--poster-bg); color: var(--poster-fg); padding: 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.poster-avatar { position: relative; width: 100%; aspect-ratio: 1 / 1; }
-.poster-avatar > img:first-child { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; display: block; background: rgba(255,255,255,.15); }
-.admin-badge { position: absolute; right: -6px; bottom: -6px; width: 30px; height: 30px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.4)); }
-.poster-id { display: flex; flex-direction: column; margin-top: 4px; }
-.poster-name { font-size: 1rem; overflow-wrap: anywhere; }
-.poster-title { font-size: .85rem; opacity: .9; }
-.poster-mail { color: var(--poster-fg); font-size: .8rem; opacity: .9; overflow-wrap: anywhere; }
-.poster-dept { margin-top: auto; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.3); font-size: .8rem; font-weight: 600; letter-spacing: .02em; }
-.post-main { padding: 12px 16px; min-width: 0; display: flex; flex-direction: column; background: linear-gradient(var(--card), var(--card)); }
-.post-head { display: flex; gap: 10px; align-items: baseline; color: var(--muted); font-size: .82rem; border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-bottom: 8px; }
-.post-link { color: var(--muted); text-decoration: none; font-family: ui-monospace, Consolas, monospace; }
+.poster { background: var(--poster-bg); color: var(--poster-fg); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* Linksboven het bedrijfslogo, rechts daarnaast het vierkante avatar. */
+.poster-top { display: flex; align-items: flex-start; gap: 8px; }
+.poster-avatar { width: 90px; height: 90px; flex: none; object-fit: cover; border-radius: 6px; display: block; background: rgba(255,255,255,.15); }
+.company-logo { width: 22px; height: 22px; flex: none; display: inline-block; background: #fff;
+    -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-position: center; mask-position: center; }
+/* Beheerder: glimmend goud (lineaire gradient op ~60 graden). */
+.company-logo.is-admin { background: linear-gradient(60deg, #8a6a1f 0%, #f7e08a 30%, #c9972c 55%, #fff3b0 75%, #a8781e 100%); }
+.poster-id { display: flex; flex-direction: column; min-width: 0; }
+.poster-name { font-size: 1rem; line-height: 1.2; overflow-wrap: anywhere; }
+.poster-title { font-size: .78rem; opacity: .9; }
+.poster-mail { color: var(--poster-fg); font-size: .72rem; opacity: .85; overflow-wrap: anywhere; }
+.poster-dept { margin-top: auto; padding-top: 6px; border-top: 1px solid rgba(255,255,255,.3); font-size: .8rem; font-weight: 600; letter-spacing: .02em; }
+.post-main { position: relative; padding: 12px 16px 0; min-width: 0; display: flex; flex-direction: column; background: linear-gradient(var(--card), var(--card)); }
+/* Voetregel onderaan het bericht: permalink links, datum/bewerkt rechts. */
+.post-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin: 10px -16px 0; padding: 4px 10px 5px; border-top: 1px solid var(--line); color: var(--muted); font-size: .78rem; }
+.post-link { color: var(--muted); text-decoration: none; }
+.post-link:hover { text-decoration: underline; }
+.post-when { text-align: right; }
 .edited { font-style: italic; }
 .post-body { overflow-wrap: anywhere; flex: 1; }
 .post-body.deleted { color: var(--muted); font-style: italic; }
@@ -111,19 +118,22 @@ form.inline { display: inline; }
     .post { grid-template-columns: 1fr; }
     .post > .poster { border-radius: 9px 9px 0 0; }
     .post > .post-main { border-radius: 0 0 9px 9px; }
-    .poster { display: grid; grid-template-columns: 44px minmax(0, 1fr); grid-template-areas: "av id" "av dept"; column-gap: 10px; row-gap: 0; padding: 8px 10px; }
-    .poster-avatar { grid-area: av; width: 44px; height: 44px; }
-    .admin-badge { width: 18px; height: 18px; right: -4px; bottom: -4px; }
-    .poster-id { grid-area: id; flex-direction: row; flex-wrap: wrap; gap: 0 8px; align-items: baseline; margin: 0; }
-    .poster-mail { display: none; }
-    .poster-dept { grid-area: dept; border: 0; padding: 0; margin: 0; font-weight: 500; opacity: .9; }
+    /* Compact: logo + avatar links, naam/e-mail en afdeling ernaast. Alleen in berichten, niet in de mention-popover. */
+    .post .poster { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "top id" "top dept"; column-gap: 10px; row-gap: 2px; padding: 6px 10px; align-items: center; }
+    .post .poster-top { grid-area: top; gap: 6px; }
+    .post .poster-avatar { width: 44px; height: 44px; }
+    .post .company-logo { width: 16px; height: 16px; }
+    .post .poster-id { grid-area: id; flex-direction: row; flex-wrap: wrap; gap: 0 8px; align-items: baseline; }
+    .post .poster-title { display: none; }
+    .post .poster-dept { grid-area: dept; border: 0; padding: 0; margin: 0; font-size: .75rem; font-weight: 500; opacity: .9; }
+    .post-main { padding: 10px 12px 0; }
+    .post-foot { margin: 8px -12px 0; padding: 4px 8px; }
     .lang-big { grid-template-columns: 1fr 1fr; gap: 10px; }
     .lang-big .flag { width: 72px; height: 48px; }
 }
 
 /* Berichtmenu rechtsboven: bij hover (desktop), altijd zichtbaar op touch. */
-.post-head { position: relative; }
-.post-menu { margin-left: auto; position: relative; }
+.post-menu { position: absolute; top: 6px; right: 8px; z-index: 4; }
 .post-menu summary { list-style: none; cursor: pointer; padding: 0 8px; border-radius: 6px; font-size: 1.1rem; line-height: 1.4; color: var(--muted); }
 .post-menu summary::-webkit-details-marker { display: none; }
 .post-menu summary:hover, .post-menu[open] summary { background: var(--bg); color: var(--text); }
@@ -169,7 +179,6 @@ form.inline { display: inline; }
 .mention-box li.active, .mention-box li:hover { background: var(--bg); }
 .mention-pop { position: absolute; z-index: 60; width: 220px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
 .mention-pop .poster { border-radius: 10px; display: flex; flex-direction: column; }
-.mention-pop .poster-avatar { width: 100%; height: auto; }
 .mention-pop .poster-mail { display: block; }
 
 /* Meldingen */

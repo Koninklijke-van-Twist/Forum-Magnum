@@ -26,5 +26,8 @@ $forumAdmins = [
 // Optioneel: extra e-maildomein => bedrijfsnaam (als companyName in Entra leeg is).
 // $companyDomains = ['voorbeeld.nl' => 'Voorbeeld BV'];
 
+// Optioneel: bedrijfslogo-koppeling (bestand web/assets/company/<sleutel>.svg), zie README.
+// $companyLogos = ['voorbeeld' => ['voorbeeld.nl', 'Voorbeeld BV']];
+
 // Optioneel: Asclepius-adres voor ticketverwijzingen (#1185).
 // $asclepiusBaseUrl = 'https://sleutels.kvt.nl/asclepius';

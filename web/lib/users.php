@@ -23,7 +23,49 @@ const FM_COMPANY_DOMAINS = [
     'kvtgermany.de' => 'KVT Germany',
     'nhmr.nl' => 'NHMR',
     'alistar.net' => 'Alistar',
+    'vantwistvastgoed.nl' => 'Van Twist Vastgoed',
 ];
+
+/**
+ * Bedrijfslogo's: sleutel => e-maildomeinen en/of bedrijfsnamen (companyName uit Entra).
+ * Het logo staat in web/assets/company/<sleutel>.svg; zonder bestand valt het terug op 'kvt'.
+ * Aan te vullen of te overschrijven via $companyLogos in auth.php.
+ */
+const FM_COMPANY_LOGOS = [
+    'kvt' => ['kvt.nl', 'Koninklijke van Twist'],
+    'hunter' => ['hunter.be', 'Hunter'],
+    'kvtgermany' => ['kvtgermany.de', 'KVT Germany'],
+    'nhmr' => ['nhmr.nl', 'NHMR'],
+    'alistar' => ['alistar.net', 'Alistar'],
+    'vantwistvastgoed' => ['vantwistvastgoed.nl', 'Van Twist Vastgoed'],
+];
+const FM_COMPANY_LOGO_FALLBACK = 'kvt';
+
+/** Sleutel van het bedrijfslogo voor deze gebruiker (companyName eerst, dan e-maildomein). */
+function fm_company_logo_key(string $email, string $company = ''): string
+{
+    $domain = strtolower((string) substr(strrchr($email, '@') ?: '', 1));
+    $company = mb_strtolower(trim($company));
+    $map = array_merge(FM_COMPANY_LOGOS, (array) ($GLOBALS['companyLogos'] ?? []));
+    $byDomain = null;
+    foreach ($map as $key => $matches) {
+        $key = (string) $key;
+        if (preg_match('/^[a-z0-9_-]+$/', $key) !== 1 || !is_file(__DIR__ . '/../assets/company/' . $key . '.svg')) {
+            continue;
+        }
+        foreach ((array) $matches as $m) {
+            $m = mb_strtolower(trim((string) $m));
+            if ($m !== '' && $company !== '' && $m === $company) {
+                return $key;
+            }
+            if ($m !== '' && $m === $domain) {
+                $byDomain ??= $key;
+            }
+        }
+    }
+
+    return $byDomain ?? FM_COMPANY_LOGO_FALLBACK;
+}
 
 /**
  * HTTP-aanroep; in tests te vervangen via $GLOBALS['fmHttp'] = fn($method, $url, $headers, $body) => [$status, $body, $contentType].

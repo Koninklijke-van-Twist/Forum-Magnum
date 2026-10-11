@@ -122,7 +122,10 @@ check(str_contains($A('GET', $threadUrl)[1], 'href="section.php?s=announcements"
 check_same(200, $s, 'thread laadt');
 check(str_contains($body, 'Welkom &lt;b&gt;') && !str_contains($body, '<script>alert'), 'escaping titel en bericht');
 check(str_contains($body, '<strong>allen</strong>') && str_contains($body, 'asclepius/index.php?open=1185'), 'opmaak en ticketlink');
-check(str_contains($body, 'assets/admin-badge.svg'), 'admin-icoon in posterblok');
+check(str_contains($body, '<span class="company-logo is-admin" role="img" aria-label="Koninklijke van Twist · Beheerder"') && str_contains($body, 'mask-image:url(&quot;assets/company/kvt.svg?v='), 'beheerder: gouden bedrijfslogo in posterblok');
+check(str_contains($body, '<div class="poster-top"><span class="company-logo') && str_contains($body, '<img class="poster-avatar" src="avatar.php?'), 'logo linksboven, avatar ernaast');
+check(!str_contains($body, 'post-head') && !str_contains($body, 'admin-badge'), 'geen berichtkop en geen oude ster meer');
+check(preg_match('/<footer class="post-foot"><a class="post-link" href="thread\.php\?id=\d+[^"]*#p(\d+)"[^>]*>#\1<\/a><span class="post-when"><time datetime="[^"]+">[^<]+<\/time><\/span><\/footer>/', $body) === 1, 'voetregel: #id-permalink links, datum rechts');
 check(str_contains($body, 'class="poster" style="--poster-bg:hsl('), 'posterblok met afdelingskleur');
 check(str_contains($body, 'tfalken@kvt.nl') && str_contains($body, 'Koninklijke van Twist'), 'e-mail en bedrijf in posterblok');
 preg_match('/id="p(\d+)"/', $body, $m);
@@ -174,6 +177,7 @@ for ($i = 0; $i <= FM_MAX_ATTACHMENTS_PER_POST; $i++) {
 check(str_contains($body, 'class="flash error"') && str_contains($body, '>net herschreven tekst</textarea>'), 'mislukte bewerking houdt de ingetypte tekst');
 [$s] = $U('POST', $threadUrl, ['action' => 'edit', 'csrf' => $csrf, 'post' => $replyId, 'body' => 'aangepast door anna']);
 check_same(303, $s, 'gebruiker bewerkt eigen bericht');
+check(preg_match('/<span class="post-when"><time[^>]*>[^<]+<\/time> <span class="edited">\((?:bewerkt|bearbeitet) [^<]+\)<\/span><\/span>/', $U('GET', $threadUrl)[1]) === 1, 'voetregel toont (bewerkt ...)');
 [$s] = $U('POST', $threadUrl, ['action' => 'edit', 'csrf' => $csrf, 'post' => $firstPost, 'body' => 'kaping']);
 check_same(403, $s, 'gebruiker kan andermans bericht niet bewerken');
 [$s] = $A('POST', $threadUrl, ['action' => 'delete', 'csrf' => $acsrf, 'post' => $replyId]);
@@ -270,7 +274,9 @@ $json = json_decode($body, true);
 check_same(200, $s, 'people.php laadt');
 check(is_array($json) && in_array('tfalken:kvt', array_column($json, 'id'), true) && !isset($json[0]['email']), 'dropdown-suggesties (zonder e-mail)');
 [$s, $body] = $U('GET', 'people.php?poster=tfalken%40kvt.nl');
-check(str_contains($body, 'class="poster"') && str_contains($body, 'admin-badge.svg'), 'posterblok bij klik op mention');
+check(str_contains($body, 'class="poster"') && str_contains($body, 'company-logo is-admin'), 'posterblok bij klik op mention');
+[$s, $body] = $U('GET', 'people.php?poster=anna.jansen%40kvt.nl');
+check(str_contains($body, '<span class="company-logo" role="img"') && !str_contains($body, 'is-admin'), 'gewone gebruiker: wit logo');
 [$s, , $hdr] = $U('POST', 'new.php?s=general', ['csrf' => $csrf, 'title' => 'Vraag voor Tim', 'body' => 'Hoi @tfalken:kvt']);
 $mentionThread = location($hdr);
 [$s, $body] = $A('GET', 'index.php');
@@ -291,7 +297,7 @@ check(!str_contains($body, 'is-unread'), 'na lezen geen ongelezen-omlijning');
 [$s, $body] = $A('GET', 'notifications.php?tab=mentions');
 check(!str_contains($body, 'class="thread is-unread"'), 'vermelding gelezen');
 
-foreach (['assets/app.css', 'assets/app.js', 'assets/admin-badge.svg', 'assets/flags/nl.svg', 'assets/flags/fr.svg', 'assets/flags/de.svg', 'assets/flags/en.svg', 'thumbnail.png'] as $asset) {
+foreach (['assets/app.css', 'assets/app.js', 'assets/company/kvt.svg', 'assets/flags/nl.svg', 'assets/flags/fr.svg', 'assets/flags/de.svg', 'assets/flags/en.svg', 'thumbnail.png'] as $asset) {
     check_same(200, $U('GET', $asset)[0], "$asset bereikbaar");
 }
 check_same(404, $U('GET', 'section.php?s=bots')[0], 'onbekende sectie 404');

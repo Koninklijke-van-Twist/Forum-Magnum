@@ -100,10 +100,7 @@ foreach ($posts as $post) {
     $attachments = $attachmentsByPost[$postId] ?? [];
     echo '<article class="post' . ($postId === $anchor ? ' first-unread' : '') . ($postId > $lastReadBefore && !$deleted ? ' is-unread' : '') . ($deleted ? ' is-deleted' : '') . '" id="p' . $postId . '">'
         . fm_poster_html((string) $post['author'])
-        . '<div class="post-main"><header class="post-head">'
-        . '<a class="post-link" href="' . h(fm_thread_url($threadId, $page, $postId)) . '" title="' . h(fm_t('link_post')) . '">post#' . $postId . '</a>'
-        . '<time datetime="' . h(gmdate('c', (int) $post['created_at'])) . '">' . h(fm_format_time((int) $post['created_at'])) . '</time>'
-        . (!empty($post['edited_at']) && !$deleted ? '<span class="edited">' . h(fm_t('edited', fm_format_time((int) $post['edited_at']))) . '</span>' : '');
+        . '<div class="post-main">';
     if (($canEdit && $editId !== $postId) || $canDelete) {
         echo '<details class="post-menu"><summary title="' . h(fm_t('menu')) . '" aria-label="' . h(fm_t('menu')) . '">⋯</summary><div class="post-menu-list">';
         if ($canEdit && $editId !== $postId) {
@@ -116,7 +113,6 @@ foreach ($posts as $post) {
         }
         echo '</div></details>';
     }
-    echo '</header>';
     if ($deleted) {
         echo '<div class="post-body deleted">' . h(fm_t('deleted_post')) . '</div>';
     } elseif ($canEdit && $editId === $postId) {
@@ -140,6 +136,12 @@ foreach ($posts as $post) {
             echo '<div class="attachments" aria-label="' . h(fm_t('attachments')) . '">' . implode('', array_map('fm_attachment_html', $listed)) . '</div>';
         }
     }
+    // Voetregel over de volle breedte: links de permalink (#id, ook als post#id te citeren), rechts datum en bewerkt.
+    echo '<footer class="post-foot">'
+        . '<a class="post-link" href="' . h(fm_thread_url($threadId, $page, $postId)) . '" title="' . h(fm_t('link_post') . ' (post#' . $postId . ')') . '">#' . $postId . '</a>'
+        . '<span class="post-when"><time datetime="' . h(gmdate('c', (int) $post['created_at'])) . '">' . h(fm_format_time((int) $post['created_at'])) . '</time>'
+        . (!empty($post['edited_at']) && !$deleted ? ' <span class="edited">(' . h(fm_t('edited', fm_format_time((int) $post['edited_at']))) . ')</span>' : '')
+        . '</span></footer>';
     echo '</div></article>';
 }
 echo '</div>';
