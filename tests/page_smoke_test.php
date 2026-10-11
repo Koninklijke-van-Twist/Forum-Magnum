@@ -146,7 +146,9 @@ check(str_contains($body, 'href="post.php?id=' . $firstPost . '">Nachricht #' . 
 check(!str_contains($body, 'data-first-unread'), 'alles gelezen: geen scroll-anker');
 preg_match_all('/<article class="post[^"]*" id="p(\d+)">.*?<\/article>/s', $body, $arts, PREG_SET_ORDER);
 check(count($arts) === 2, 'twee berichten');
-check(!str_contains($arts[0][0], 'post-menu'), 'geen menu op andermans bericht (gebruiker)');
+check(str_contains($arts[0][0], 'post-menu') && str_contains($arts[0][0], '<button type="button" data-copy-link="post.php?id=' . $arts[0][1] . '" data-copied="Link kopiert">Link kopieren</button>')
+    && !str_contains($arts[0][0], '>Bearbeiten<') && !str_contains($arts[0][0], '>Löschen<'), 'andermans bericht (gebruiker): menu met alleen Link kopieren');
+check_same(2, substr_count($body, 'data-copy-link="post.php?id='), 'Link kopieren op elk bericht');
 check(str_contains($arts[1][0], 'post-menu') && str_contains($arts[1][0], '>Bearbeiten<') && str_contains($arts[1][0], '>Löschen<'), 'eigen bericht: menu met bewerken + verwijderen');
 check(substr_count($body, 'edit=') === 1, 'geen losse bewerkknop buiten het menu');
 check(str_contains($body, 'edit='), 'gebruiker kan eigen bericht bewerken');
@@ -184,6 +186,7 @@ check_same(403, $s, 'gebruiker kan andermans bericht niet bewerken');
 check_same(303, $s, 'admin verwijdert reactie');
 [$s, $body] = $A('GET', $threadUrl);
 check(str_contains($body, 'class="post is-deleted"') && str_contains($body, '>Bericht verwijderd<') && !str_contains($body, 'aangepast door anna'), 'verwijderd bericht leeg en gemarkeerd');
+check(preg_match('/<article class="post is-deleted" id="p(\d+)">.*?data-copy-link="post\.php\?id=\1"/s', $body) === 1, 'verwijderd bericht: link kopiëren kan ook');
 check(substr_count($body, 'class="poster"') === 2, 'posterblok van verwijderd bericht blijft');
 [$s] = $U('POST', $threadUrl, ['action' => 'delete', 'csrf' => $csrf, 'post' => $firstPost]);
 check_same(403, $s, 'gebruiker kan niet verwijderen');
