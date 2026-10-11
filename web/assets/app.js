@@ -173,33 +173,35 @@ document.addEventListener('submit', function (e) {
     }, true);
     document.addEventListener('focusout', function (e) { if (e.target === field) { setTimeout(close, 150); } });
 
-    var pop = null;
-    function closePop() { if (pop) { pop.remove(); pop = null; } }
+    /* Profielmodal: klik op een @-vermelding, avatar of naam (data-poster). */
+    var modal = null, opener = null;
+    function closeModal() { if (modal) { modal.close(); } }
+    function cleanupModal() {
+        if (modal) { modal.remove(); modal = null; }
+        if (opener) { opener.focus(); opener = null; }
+    }
     document.addEventListener('click', function (e) {
+        if (modal && (e.target === modal || e.target.closest('[data-close]'))) { closeModal(); return; }
         var b = e.target.closest('[data-poster]');
-        if (b && pop && pop.contains(b)) { return; }
-        if (!b) {
-            if (pop && !pop.contains(e.target)) { closePop(); }
-            return;
-        }
+        if (!b || (modal && modal.contains(b))) { return; }
         e.preventDefault();
-        closePop();
-        fetch('people.php?poster=' + encodeURIComponent(b.getAttribute('data-poster')), { credentials: 'same-origin' })
+        opener = b;
+        fetch('profile.php?u=' + encodeURIComponent(b.getAttribute('data-poster')), { credentials: 'same-origin' })
             .then(function (r) { return r.ok ? r.text() : ''; })
             .then(function (html) {
-                if (!html) { return; }
-                pop = document.createElement('div');
-                pop.className = 'mention-pop';
-                pop.innerHTML = html; // server-side gerenderd en ge-escaped (fm_poster_html)
-                document.body.appendChild(pop);
-                fitAll(pop);
-                var r = b.getBoundingClientRect();
-                var left = Math.min(window.scrollX + r.left, window.scrollX + document.documentElement.clientWidth - 250);
-                pop.style.left = Math.max(8, left) + 'px';
-                pop.style.top = (window.scrollY + r.bottom + 6) + 'px';
+                if (!html || !opener) { return; }
+                if (modal) { modal.removeEventListener('close', cleanupModal); modal.close(); modal.remove(); }
+                modal = document.createElement('dialog');
+                modal.className = 'profile-modal';
+                modal.innerHTML = html; // server-side gerenderd en ge-escaped (fm_profile_html)
+                modal.addEventListener('close', cleanupModal); // ook bij Escape
+                document.body.appendChild(modal);
+                modal.showModal();
+                fitAll(modal);
+                var hm = modal.querySelector('.heatmap');
+                if (hm) { hm.scrollLeft = hm.scrollWidth; } // nieuwste weken in beeld (mobiel scrollt horizontaal)
             });
     });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closePop(); } });
 })();
 
 /* Tekst op één regel houden: lettergrootte omlaag tot hij past (min 9px), daarna ellipsis. */
