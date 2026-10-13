@@ -80,6 +80,7 @@ $editId = (int) ($_GET['edit'] ?? 0);
 $attachmentsByPost = fm_attachments_for_posts(array_column($posts, 'id'));
 $translationsByPost = fm_translations_for_posts($posts);
 fm_retry_failed_translations($posts);
+fm_queue_untranslated_posts($posts, $translationsByPost);
 $lastReadBefore = fm_last_read($threadId, $fmUser);
 if ($posts !== []) {
     fm_mark_read($threadId, $fmUser, (int) end($posts)['id']);

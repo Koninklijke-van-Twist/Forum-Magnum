@@ -11,7 +11,8 @@ declare(strict_types=1);
  * - post_translations: per bericht en taal de vertaalde ruwe opmaaktekst + source_hash
  *   (sha256 van de body waarvoor vertaald is). Bewerkt bericht => andere hash => oude callback genegeerd.
  *
- * Zonder geldige $copilotTranslate in auth.php doet dit allemaal niets.
+ * Bij threadweergave: mislukte opnieuw (max 3) en nooit aangevraagde alsnog (max 5),
+ * niet-blokkerend na fastcgi_finish_request. Zonder geldige $copilotTranslate: niets.
  */
 
 require_once __DIR__ . '/CoPilotTranslate.php';
@@ -172,6 +173,42 @@ function fm_retry_failed_translations(array $posts, int $limit = 3): void
             fm_queue_translation((int) $p['id']);
             $limit--;
         }
+    }
+}
+
+/**
+ * Nooit aangevraagde vertalingen (lege translation_status, geen actuele vertalingen) alsnog
+ * in de wachtrij zetten bij weergave — o.a. berichten van vóór deze feature (max. $limit per request).
+ * Zet eerst pending (claim) om dubbele aanvragen te voorkomen. Zonder config: niets.
+ *
+ * @param array<int, array<string,string>> $translationsByPost
+ */
+function fm_queue_untranslated_posts(array $posts, array $translationsByPost, int $limit = 5): void
+{
+    if (fm_translate_config() === null || $limit <= 0) {
+        return;
+    }
+    foreach ($posts as $p) {
+        if ($limit <= 0) {
+            return;
+        }
+        $id = (int) $p['id'];
+        if ($id <= 0 || !empty($p['deleted_at']) || trim((string) ($p['body'] ?? '')) === '') {
+            continue;
+        }
+        if (($p['translation_status'] ?? '') !== '') {
+            continue;
+        }
+        if (($translationsByPost[$id] ?? []) !== []) {
+            continue;
+        }
+        $st = fm_db()->prepare("UPDATE posts SET translation_status = 'pending' WHERE id = ? AND translation_status = ''");
+        $st->execute([$id]);
+        if ($st->rowCount() === 0) {
+            continue;
+        }
+        fm_queue_translation($id);
+        $limit--;
     }
 }
 

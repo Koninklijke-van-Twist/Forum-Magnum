@@ -61,4 +61,59 @@ $n = (int) fm_db()->query('SELECT COUNT(*) FROM post_translations WHERE post_id 
 check_same(0, $n, 'vertalingen weg na verwijderen');
 check(!fm_store_translations($postId, fm_source_hash(''), ['nl' => 'a', 'en' => 'b', 'fr' => 'c', 'de' => 'd'], null), 'geen vertaling voor verwijderd bericht');
 
+// Lazy queue bij weergave: nooit aangevraagde posts (lege status, geen vertalingen)
+$GLOBALS['copilotTranslate'] = null;
+$tLazy = fm_create_thread('general', 'jan@kvt.nl', 'Lazy', 'Oude post zonder vertaling');
+$lazyId = fm_first_post_id($tLazy);
+$lazyPost = fm_get_post($lazyId);
+check_same('', $lazyPost['translation_status'], 'lazy: status leeg bij nieuw bericht zonder config-queue');
+unset($GLOBALS['fmTranslateQueue']);
+fm_queue_untranslated_posts([$lazyPost], []);
+check(!isset($GLOBALS['fmTranslateQueue'][$lazyId]), 'lazy: zonder config niet in wachtrij');
+check_same('', fm_get_post($lazyId)['translation_status'], 'lazy: zonder config status ongewijzigd');
+
+$GLOBALS['copilotTranslate'] = ['flowUrl' => 'https://example.invalid/flow', 'callbackSecret' => str_repeat('s', 20)];
+unset($GLOBALS['fmTranslateQueue']);
+fm_queue_untranslated_posts([fm_get_post($lazyId)], []);
+check(isset($GLOBALS['fmTranslateQueue'][$lazyId]), 'lazy: met config in wachtrij');
+check_same('pending', fm_get_post($lazyId)['translation_status'], 'lazy: status pending als claim');
+// Tweede call mag niet opnieuw queueën (al pending)
+$qBefore = $GLOBALS['fmTranslateQueue'];
+fm_queue_untranslated_posts([fm_get_post($lazyId)], []);
+check_same($qBefore, $GLOBALS['fmTranslateQueue'], 'lazy: pending niet opnieuw');
+$GLOBALS['fmTranslateQueue'] = []; // shutdown niet echt naar de flow laten gaan
+
+// Limiet 5 nieuwe + mislukte blijven via aparte retry (3)
+$ids = [];
+for ($i = 0; $i < 7; $i++) {
+    $tid = fm_create_thread('general', 'jan@kvt.nl', "L$i", "Body $i");
+    $ids[] = fm_first_post_id($tid);
+}
+$batch = array_map('fm_get_post', $ids);
+unset($GLOBALS['fmTranslateQueue']);
+fm_queue_untranslated_posts($batch, [], 5);
+check_same(5, count($GLOBALS['fmTranslateQueue'] ?? []), 'lazy: max 5 per request');
+$pending = 0;
+foreach ($ids as $id) {
+    if (fm_get_post($id)['translation_status'] === 'pending') {
+        $pending++;
+    }
+}
+check_same(5, $pending, 'lazy: precies 5 pending geclaimd');
+$GLOBALS['fmTranslateQueue'] = [];
+
+// Met bestaande vertalingen: niet queueën
+$tDone = fm_create_thread('general', 'jan@kvt.nl', 'Done', 'Hallo wereld');
+$doneId = fm_first_post_id($tDone);
+fm_store_translations($doneId, fm_source_hash('Hallo wereld'), ['nl' => 'Hallo wereld', 'en' => 'Hello world', 'fr' => 'f', 'de' => 'd'], 'nl');
+// store zet done; simuleer "nooit aangevraagd maar wél vertalingen" door status leeg te zetten
+fm_db()->prepare("UPDATE posts SET translation_status = '' WHERE id = ?")->execute([$doneId]);
+unset($GLOBALS['fmTranslateQueue']);
+$tr = fm_translations_for_posts([fm_get_post($doneId)]);
+fm_queue_untranslated_posts([fm_get_post($doneId)], $tr);
+check(!isset($GLOBALS['fmTranslateQueue'][$doneId]), 'lazy: met vertalingen niet in wachtrij');
+check_same('', fm_get_post($doneId)['translation_status'], 'lazy: met vertalingen status niet geclaimd');
+
+$GLOBALS['copilotTranslate'] = null;
+
 finish('translate');
