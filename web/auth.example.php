@@ -39,5 +39,5 @@ $forumAdmins = [
 //     'flowUrl' => 'https://prod-00.westeurope.logic.azure.com:443/workflows/.../triggers/manual/paths/invoke?...',
 //     'callbackSecret' => 'MINIMAAL-16-TEKENS-WILLEKEURIG', // bijv. bin2hex(random_bytes(32))
 //     // 'callbackBaseUrl' => 'https://sleutels.kvt.nl/forum-magnum', // optioneel, anders uit de request
-//     // 'syncTimeout' => 90, // seconden wachten op een synchrone Response (na het antwoord aan de browser)
+//     // 'syncTimeout' => 300, // seconden (default 300; server: max_execution_time/request_terminate_timeout ≥ 330) wachten op een synchrone Response (na het antwoord aan de browser)
 // ];

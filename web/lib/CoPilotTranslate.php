@@ -77,7 +77,7 @@ function cpt_send(array $config, string $id, string $text, ?string $sourceHint, 
         CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Accept: application/json'],
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_CONNECTTIMEOUT_MS => (int) min(2000, max(200, $timeout * 1000)),
+        CURLOPT_CONNECTTIMEOUT_MS => (int) min(30000, max(200, $timeout * 1000)), // verbinden: max. 30 s; TIMEOUT = hele wachttijd
         CURLOPT_TIMEOUT_MS => (int) max(200, $timeout * 1000),
         CURLOPT_NOSIGNAL => true,
     ]);
