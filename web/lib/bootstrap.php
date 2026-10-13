@@ -14,6 +14,7 @@ require_once __DIR__ . '/users.php';
 require_once __DIR__ . '/mentions.php';
 require_once __DIR__ . '/profile.php';
 require_once __DIR__ . '/markdown.php';
+require_once __DIR__ . '/translate.php';
 require_once __DIR__ . '/layout.php';
 
 $fmAuthFile = getenv('FM_AUTH_FILE') ?: __DIR__ . '/../auth.php';
@@ -22,6 +23,7 @@ if (is_file($fmAuthFile)) {
 }
 $forumAdmins = isset($forumAdmins) && is_array($forumAdmins) ? $forumAdmins : [];
 $GLOBALS['forumAdmins'] = $forumAdmins;
+$GLOBALS['copilotTranslate'] = isset($copilotTranslate) && is_array($copilotTranslate) ? $copilotTranslate : null;
 require_once __DIR__ . '/../logincheck.php';
 
 if (session_status() !== PHP_SESSION_ACTIVE) {

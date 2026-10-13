@@ -264,3 +264,18 @@ document.addEventListener('click', function (e) {
         done();
     }
 });
+// Vertaalde berichten: wisselen tussen vertaling en origineel.
+document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-toggle-original]');
+    if (!b) { return; }
+    var main = b.closest('.post-main');
+    var tr = main && main.querySelector('[data-translated]');
+    var or = main && main.querySelector('[data-original]');
+    if (!tr || !or) { return; }
+    var showOriginal = or.hidden;
+    or.hidden = !showOriginal;
+    tr.hidden = showOriginal;
+    var label = b.textContent;
+    b.textContent = b.getAttribute('data-alt');
+    b.setAttribute('data-alt', label);
+});
