@@ -284,7 +284,7 @@ document.addEventListener('click', function (e) {
 // 'Vertaling volgt': zolang de pagina zichtbaar openstaat de eigen server vragen (5, 10, 20 … 60 s, max. ~15 min).
 (function () {
     var list = document.querySelector('.posts');
-    if (!list || !document.querySelector('[data-translation-poll]')) { return; }
+    if (!list) { return; }
     var delays = [5000, 10000, 20000, 40000, 60000], step = 0, usedMs = 0, visibleSince = document.hidden ? 0 : Date.now(), timer = null, busy = false;
     // 15 min telt alleen zichtbare tijd; elke id blijft gepolld tot er HTML staat of de server 'klaar/opgegeven' meldt.
     // Gepolld wordt elke [data-translation-poll] (ook failed zonder label); nextAt = niet vóór de backoff-retry.
@@ -393,6 +393,8 @@ document.addEventListener('click', function (e) {
             if (!busy) { clearTimeout(timer); timer = null; poll(); }
         } else if (!timer && !busy) { step = 0; schedule(); }
     });
+    // Live-thread voegt posts in: daarna (opnieuw) beginnen als er iets te pollen is.
+    window.fmTranslationPollKick = function () { if (!timer && !busy) { step = 0; schedule(); } };
     schedule();
 })();
 // Beheerders: 'Vertaling mislukt' => modal met fouttekst, tijdstip en pogingen.
@@ -412,3 +414,85 @@ document.addEventListener('click', function (e) {
     document.body.appendChild(d);
     d.showModal();
 });
+
+// Live-thread: nieuwe, bewerkte en verwijderde berichten inladen zolang het tabblad zichtbaar is.
+// 20 s; bij inactiviteit oplopend tot 60 s; verborgen = stop, zichtbaar = meteen; bij fouten backoff.
+(function () {
+    var list = document.querySelector('.posts[data-thread]');
+    if (!list || !window.fetch) { return; }
+    var since = list.getAttribute('data-since') || '0', page = Number(list.getAttribute('data-page')) || 1;
+    var timer = null, busy = false, errors = 0, lastActive = Date.now();
+    ['mousemove', 'keydown', 'scroll', 'touchstart', 'click'].forEach(function (t) {
+        document.addEventListener(t, function () { lastActive = Date.now(); }, { passive: true });
+    });
+    function interval() {
+        if (errors) { return Math.min(300000, 20000 * Math.pow(2, errors)); }
+        var idle = Date.now() - lastActive;
+        return idle < 120000 ? 20000 : idle < 300000 ? 40000 : 60000;
+    }
+    function notice(key, text, href) {
+        var n = document.querySelector('[data-live-notice="' + key + '"]');
+        if (!n) {
+            n = document.createElement('p');
+            n.className = 'flash live-notice';
+            n.setAttribute('data-live-notice', key);
+            list.parentNode.insertBefore(n, list.nextSibling);
+        }
+        n.textContent = '';
+        if (href) { var a = document.createElement('a'); a.href = href; a.textContent = text; n.appendChild(a); } else { n.textContent = text; }
+    }
+    function toElement(html) {
+        var t = document.createElement('template');
+        t.innerHTML = html.trim();
+        return t.content.firstElementChild;
+    }
+    function apply(data) {
+        var posts = data.posts || {}, inserted = false;
+        Object.keys(posts).sort(function (a, b) { return a - b; }).forEach(function (id) {
+            var row = posts[id], art = document.getElementById('p' + id);
+            if (art) {
+                if (Number(art.getAttribute('data-updated') || 0) >= row.updated_at) { return; }
+                if (art.querySelector('form.composer')) { notice('editing-' + id, list.getAttribute('data-changed-editing')); return; }
+                var wasOpen = art.querySelector('[data-original]:not([hidden])') !== null && art.querySelector('[data-translated]') !== null;
+                var el = toElement(row.html);
+                if (!el) { return; }
+                art.replaceWith(el);
+                if (wasOpen) { var b = el.querySelector('[data-toggle-original]'); if (b) { b.click(); } } // lezer keek naar het origineel
+                inserted = true;
+                if (typeof fitAll === 'function') { fitAll(el); }
+            } else if (!row.deleted) {
+                if (row.page === page) {
+                    var nel = toElement(row.html);
+                    if (nel) { list.appendChild(nel); inserted = true; if (typeof fitAll === 'function') { fitAll(nel); } }
+                } else if (row.page > page) {
+                    notice('new', list.getAttribute('data-new-posts'), data.last_url || list.getAttribute('data-last-url'));
+                }
+            }
+        });
+        if (inserted && window.fmTranslationPollKick) { window.fmTranslationPollKick(); }
+    }
+    function schedule(ms) {
+        clearTimeout(timer);
+        timer = document.hidden ? null : setTimeout(poll, ms === undefined ? interval() : ms);
+    }
+    function poll() {
+        timer = null;
+        if (busy || document.hidden) { return; }
+        busy = true;
+        var edit = list.querySelector('article form.composer input[name="post"]');
+        var ids = Array.prototype.map.call(document.querySelectorAll('[data-translation-poll]'), function (el) { return el.getAttribute('data-translation-poll'); }).slice(0, 50);
+        var url = 'thread_updates.php?thread=' + encodeURIComponent(list.getAttribute('data-thread')) + '&since=' + encodeURIComponent(since)
+            + '&page=' + page + (edit ? '&edit=' + encodeURIComponent(edit.value) : '') + (ids.length ? '&ids=' + ids.join(',') : '');
+        var ctrl = 'AbortController' in window ? new AbortController() : null;
+        var guard = ctrl ? setTimeout(function () { ctrl.abort(); }, 25000) : null;
+        fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' }, signal: ctrl ? ctrl.signal : undefined })
+            .then(function (r) { if (!r.ok) { throw new Error('HTTP ' + r.status); } return r.json(); })
+            .then(function (data) { errors = 0; apply(data); if (data.since) { since = String(data.since); } })
+            .catch(function () { errors = Math.min(errors + 1, 4); })
+            .then(function () { clearTimeout(guard); busy = false; schedule(); });
+    }
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) { clearTimeout(timer); timer = null; } else if (!busy) { lastActive = Date.now(); schedule(0); }
+    });
+    schedule();
+})();

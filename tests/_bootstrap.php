@@ -24,6 +24,7 @@ require_once $web . '/profile.php';
 require_once $web . '/markdown.php';
 require_once $web . '/translate.php';
 require_once $web . '/layout.php';
+require_once $web . '/postview.php';
 
 $GLOBALS['fmTestCount'] = 0;
 $GLOBALS['fmTestFailures'] = 0;

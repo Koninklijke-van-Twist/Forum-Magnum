@@ -100,77 +100,14 @@ if ($error !== '') {
     echo '<p class="flash error">' . h($error) . '</p>';
 }
 echo fm_pagination($page, $pages, $pagerUrl);
-echo '<div class="posts" data-show-original="' . h(fm_t('show_original')) . '" data-show-translation="' . h(fm_t('show_translation')) . '"' . ($anchor > 0 ? ' data-first-unread="p' . $anchor . '"' : '') . '>';
+echo '<div class="posts" data-thread="' . $threadId . '" data-page="' . $page . '" data-since="' . fm_thread_version($threadId) . '"'
+    . ' data-new-posts="' . h(fm_t('new_posts')) . '" data-changed-editing="' . h(fm_t('post_changed_while_editing')) . '"'
+    . ' data-last-url="' . h(fm_thread_url($threadId, $pages)) . '" data-show-original="' . h(fm_t('show_original')) . '" data-show-translation="' . h(fm_t('show_translation')) . '"' . ($anchor > 0 ? ' data-first-unread="p' . $anchor . '"' : '') . '>';
+$renderCtx = ['thread' => $thread, 'page' => $page, 'firstPostId' => $firstPostId, 'editId' => $editId, 'editDraft' => $editDraft,
+    'attachments' => $attachmentsByPost, 'translations' => $translationsByPost, 'user' => $fmUser, 'isAdmin' => $fmIsAdmin,
+    'anchor' => $anchor, 'lastReadBefore' => $lastReadBefore];
 foreach ($posts as $post) {
-    $postId = (int) $post['id'];
-    $deleted = !empty($post['deleted_at']);
-    $canEdit = fm_can_edit_post($post, $fmUser);
-    $canDelete = fm_can_delete_post($post, $fmUser);
-    $attachments = $attachmentsByPost[$postId] ?? [];
-    echo '<article class="post' . ($postId === $anchor ? ' first-unread' : '') . ($postId > $lastReadBefore && !$deleted ? ' is-unread' : '') . ($deleted ? ' is-deleted' : '') . '" id="p' . $postId . '">'
-        . fm_poster_html((string) $post['author'])
-        . '<div class="post-main">';
-    // Menu op elk bericht: 'Kopieer link' voor iedereen (ook verwijderd), bewerken/verwijderen alleen waar toegestaan.
-    echo '<details class="post-menu"><summary title="' . h(fm_t('menu')) . '" aria-label="' . h(fm_t('menu')) . '">⋯</summary><div class="post-menu-list">'
-        . (!$deleted && $editId !== $postId && fm_pick_translation($post, $translationsByPost[$postId] ?? [], fm_lang()) !== null
-            ? '<button type="button" data-toggle-original data-alt="' . h(fm_t('show_translation')) . '">' . h(fm_t('show_original')) . '</button>' : '')
-        . '<button type="button" data-copy-link="' . h('post.php?id=' . $postId) . '" data-copied="' . h(fm_t('link_copied')) . '">' . h(fm_t('copy_link')) . '</button>';
-    if ($canEdit && $editId !== $postId) {
-        echo '<a href="' . h('thread.php?' . http_build_query(['id' => $threadId, 'p' => $page, 'edit' => $postId]) . '#p' . $postId) . '">' . h(fm_t('edit')) . '</a>';
-    }
-    if ($fmIsAdmin && !$deleted && fm_translate_config() !== null) {
-        $canRetranslate = fm_can_request_retranslation($post);
-        echo '<form method="post">' . fm_csrf_field()
-            . '<input type="hidden" name="action" value="retranslate"><input type="hidden" name="post" value="' . $postId . '">'
-            . '<button type="submit"' . ($canRetranslate ? '' : ' disabled') . '>' . h(fm_t('retranslate')) . '</button></form>';
-    }
-    if ($canDelete) {
-        echo '<form method="post" data-confirm="' . h(fm_t('confirm_delete')) . '">' . fm_csrf_field()
-            . '<input type="hidden" name="action" value="delete"><input type="hidden" name="post" value="' . $postId . '">'
-            . '<button type="submit" class="danger">' . h(fm_t('delete')) . '</button></form>';
-    }
-    echo '</div></details>';
-    if ($deleted) {
-        echo '<div class="post-body deleted">' . h(fm_t('deleted_post')) . '</div>';
-    } elseif ($canEdit && $editId === $postId) {
-        $draft = $editDraft !== null && $editDraft[0] === $postId ? $editDraft : null;
-        $removeList = '';
-        foreach ($attachments as $att) {
-            $removeList .= '<label class="attachment-remove"><input type="checkbox" name="remove_attachment[]" value="' . (int) $att['id'] . '"> '
-                . h(fm_t('remove_attachment')) . ': ' . h((string) $att['original_name']) . '</label>';
-        }
-        echo '<form method="post" enctype="multipart/form-data" class="composer open">' . fm_csrf_field()
-            . '<input type="hidden" name="action" value="edit"><input type="hidden" name="post" value="' . $postId . '">'
-            . ($postId === $firstPostId ? '<input type="text" name="title" maxlength="150" required aria-label="' . h(fm_t('title')) . '" value="' . h($draft[2] ?? (string) $thread['title']) . '">' : '')
-            . '<textarea name="body" rows="8" data-mentions data-body-or-files data-empty-msg="' . h(fm_t('err_empty')) . '" aria-label="' . h(fm_t('message')) . '">' . h($draft[1] ?? (string) $post['body']) . '</textarea>'
-            . ($removeList !== '' ? '<div class="attachment-removes">' . $removeList . '</div>' : '')
-            . '<div class="actions">' . fm_attachment_input_html() . '<a class="btn ghost" href="' . h(fm_thread_url($threadId, $page, $postId)) . '">' . h(fm_t('cancel')) . '</a>'
-            . '<button type="submit" class="btn">' . h(fm_t('save')) . '</button></div></form>';
-    } else {
-        $translated = fm_pick_translation($post, $translationsByPost[$postId] ?? [], fm_lang());
-        if ($translated !== null) {
-            // Vertaling standaard; origineel ernaast verborgen, met een klein wisselknopje.
-            echo '<div class="post-body message-md" data-translated lang="' . h(FM_LANGUAGES[fm_lang()][1]) . '">' . renderTicketMessageMarkdown($translated, 0, $attachments) . '</div>'
-                . '<div class="post-body message-md" data-original hidden ' . (isset(FM_LANGUAGES[(string) $post['source_lang']]) ? ' lang="' . h(FM_LANGUAGES[(string) $post['source_lang']][1]) . '"' : '') . '>' . renderTicketMessageMarkdown((string) $post['body'], 0, $attachments) . '</div>'
-;
-        } else {
-            echo '<div class="post-body message-md" data-body>' . renderTicketMessageMarkdown((string) $post['body'], 0, $attachments) . '</div>';
-        }
-        $listed = fm_unreferenced_attachments($attachments, (string) $post['body']);
-        if ($listed !== []) {
-            echo '<div class="attachments" aria-label="' . h(fm_t('attachments')) . '">' . implode('', array_map('fm_attachment_html', $listed)) . '</div>';
-        }
-    }
-    // Voetregel over de volle breedte: links de permalink (#id, ook als post#id te citeren), rechts datum en bewerkt.
-    $pollNeeded = !$deleted && $editId !== $postId && fm_translation_poll_needed($post, $translationsByPost[$postId] ?? [], fm_lang());
-    echo '<footer class="post-foot">'
-        . '<span class="post-ref"' . ($pollNeeded ? ' data-translation-poll="' . $postId . '"' : '') . '><a class="post-link" href="' . h(fm_thread_url($threadId, $page, $postId)) . '" title="' . h(fm_t('link_post') . ' (post#' . $postId . ')') . '">#' . $postId . '</a>'
-        . (!$deleted && $editId !== $postId ? fm_translation_badge_html($post, $translationsByPost[$postId] ?? [], fm_lang(), $fmIsAdmin) : '')
-        . '</span>'
-        . '<span class="post-when"><time datetime="' . h(gmdate('c', (int) $post['created_at'])) . '">' . h(fm_format_time((int) $post['created_at'])) . '</time>'
-        . (!empty($post['edited_at']) && !$deleted ? ' <span class="edited">(' . h(fm_t('edited', fm_format_time((int) $post['edited_at']))) . ')</span>' : '')
-        . '</span></footer>';
-    echo '</div></article>';
+    echo fm_render_post_html($post, $renderCtx);
 }
 echo '</div>';
 echo fm_pagination($page, $pages, $pagerUrl);
