@@ -232,3 +232,4 @@ button.translation-pending.is-failed { border: 0; background: none; padding: 0; 
 .translation-error-modal::backdrop { background: rgba(15, 23, 42, .45); }
 .translation-error-modal h2 { margin: 0 0 4px; font-size: 1rem; }
 .translation-error-modal pre { white-space: pre-wrap; word-break: break-word; max-height: 50vh; overflow: auto; background: rgba(0,0,0,.04); padding: 8px; border-radius: 6px; font-size: .8rem; }
+.live-notice { margin: 8px 0; text-align: center; }

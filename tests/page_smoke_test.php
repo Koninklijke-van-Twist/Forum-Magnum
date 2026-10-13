@@ -144,7 +144,7 @@ check(preg_match('/^thread\.php\?id=\d+&p=1#p\d+$/', location($hdr)) === 1, 'pos
 [$s, $body] = $U('GET', $threadUrl);
 check(str_contains($body, 'href="post.php?id=' . $firstPost . '">Nachricht #' . $firstPost), 'post-verwijzing gerenderd (DE)');
 check(!str_contains($body, 'data-first-unread'), 'alles gelezen: geen scroll-anker');
-preg_match_all('/<article class="post[^"]*" id="p(\d+)">.*?<\/article>/s', $body, $arts, PREG_SET_ORDER);
+preg_match_all('/<article class="post[^"]*" id="p(\d+)"[^>]*>.*?<\/article>/s', $body, $arts, PREG_SET_ORDER);
 check(count($arts) === 2, 'twee berichten');
 check(str_contains($arts[0][0], 'post-menu') && str_contains($arts[0][0], '<button type="button" data-copy-link="post.php?id=' . $arts[0][1] . '" data-copied="Link kopiert">Link kopieren</button>')
     && !str_contains($arts[0][0], '>Bearbeiten<') && !str_contains($arts[0][0], '>Löschen<'), 'andermans bericht (gebruiker): menu met alleen Link kopieren');
@@ -160,7 +160,7 @@ check(str_contains($body, 'is-unread') && str_contains($body, '1 nieuw'), 'ongel
 check(str_contains($body, '>Verwijderen<'), 'admin ziet verwijderen');
 preg_match_all('/id="p(\d+)"/', $body, $m);
 $replyId = (int) end($m[1]);
-preg_match_all('/<article class="post[^"]*" id="p(\d+)">.*?<\/article>/s', $body, $arts, PREG_SET_ORDER);
+preg_match_all('/<article class="post[^"]*" id="p(\d+)"[^>]*>.*?<\/article>/s', $body, $arts, PREG_SET_ORDER);
 check(str_contains($arts[1][0], 'post-menu') && str_contains($arts[1][0], '>Verwijderen<') && !str_contains($arts[1][0], 'edit='), 'admin op andermans bericht: alleen verwijderen');
 check(str_contains($arts[0][0], '>Bewerken<') && str_contains($arts[0][0], '>Verwijderen<'), 'admin op eigen bericht: bewerken + verwijderen');
 [$s, $body] = $A('GET', 'thread.php?' . parse_url($threadUrl, PHP_URL_QUERY) . '&edit=' . $replyId);
@@ -186,7 +186,7 @@ check_same(403, $s, 'gebruiker kan andermans bericht niet bewerken');
 check_same(303, $s, 'admin verwijdert reactie');
 [$s, $body] = $A('GET', $threadUrl);
 check(str_contains($body, 'class="post is-deleted"') && str_contains($body, '>Bericht verwijderd<') && !str_contains($body, 'aangepast door anna'), 'verwijderd bericht leeg en gemarkeerd');
-check(preg_match('/<article class="post is-deleted" id="p(\d+)">.*?data-copy-link="post\.php\?id=\1"/s', $body) === 1, 'verwijderd bericht: link kopiëren kan ook');
+check(preg_match('/<article class="post is-deleted" id="p(\d+)"[^>]*>.*?data-copy-link="post\.php\?id=\1"/s', $body) === 1, 'verwijderd bericht: link kopiëren kan ook');
 check(substr_count($body, 'class="poster"') === 2, 'posterblok van verwijderd bericht blijft');
 [$s] = $U('POST', $threadUrl, ['action' => 'delete', 'csrf' => $csrf, 'post' => $firstPost]);
 check_same(403, $s, 'gebruiker kan niet verwijderen');
@@ -312,5 +312,17 @@ foreach (['assets/app.css', 'assets/app.js', 'assets/company/kvt.svg', 'assets/f
 }
 check_same(404, $U('GET', 'section.php?s=bots')[0], 'onbekende sectie 404');
 check_same(404, $U('GET', 'thread.php?id=99999')[0], 'onbekende thread 404');
+
+// Live-thread endpoint
+preg_match('/id=(\d+)/', $threadUrl, $tm);
+[$s, $json, $h] = $U('GET', 'thread_updates.php?thread=' . $tm[1] . '&since=1&page=1');
+$live = json_decode($json, true);
+check_same(200, $s, 'thread_updates: 200');
+check(str_contains($h, 'application/json') && is_array($live['posts'] ?? null) && $live['posts'] !== [] && ($live['since'] ?? 0) > 1, 'thread_updates: posts + since');
+check(str_contains((string) (reset($live['posts'])['html'] ?? ''), '<article class="post'), 'thread_updates: article-HTML');
+[$s] = $U('GET', 'thread_updates.php?thread=999999&since=1');
+check_same(404, $s, 'thread_updates: onbekende thread 404');
+[$s, $body] = $U('GET', $threadUrl);
+check(preg_match('/<div class="posts" data-thread="\d+" data-page="\d+" data-since="\d+"/', $body) === 1, 'thread: live-attributen');
 
 finish('page_smoke');
