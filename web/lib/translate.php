@@ -118,7 +118,7 @@ function fm_claim_translation(int $postId, string $mode = 'any', ?int $now = nul
     $staleBefore = $now - fm_translate_stale_seconds();
     if ($mode === 'new') {
         $st = fm_db()->prepare("UPDATE posts SET translation_status = 'pending', translation_requested_at = ?
-            WHERE id = ? AND (translation_status = ''
+            WHERE id = ? AND (translation_status IN ('', 'retry')
                 OR (translation_status = 'pending' AND (translation_requested_at = 0 OR translation_requested_at < ?)))");
         $st->execute([$now, $postId, $staleBefore]);
     } elseif ($mode === 'failed') {
@@ -224,15 +224,23 @@ function fm_run_translation_queue(): void
  */
 function fm_finish_response(): bool
 {
-    if (PHP_SAPI === 'cli' || PHP_SAPI === 'phpdbg' || headers_sent()) {
+    if (PHP_SAPI === 'cli' || PHP_SAPI === 'phpdbg') {
         return false;
     }
+    // Altijd: browser-afbreken mag het werk niet stoppen, sessie niet vasthouden.
+    ignore_user_abort(true);
     if (session_status() === PHP_SESSION_ACTIVE) {
         session_write_close();
     }
-    ignore_user_abort(true);
     if (function_exists('fastcgi_finish_request')) {
         return (bool) @fastcgi_finish_request();
+    }
+    if (headers_sent()) {
+        return false;
+    }
+    @ini_set('zlib.output_compression', '0');
+    if (function_exists('apache_setenv')) {
+        @apache_setenv('no-gzip', '1'); // mod_deflate zou Content-Length/flush ongedaan maken
     }
     $out = '';
     while (ob_get_level() > 0) {
@@ -307,6 +315,11 @@ function fm_translate_post(int $postId, ?float $timeout = null): void
     $result = cpt_send($config, (string) $postId, $body, $hint !== '' ? $hint : null, $callbackUrl, $token,
         fm_translate_sync_timeout($config, $timeout), $status, $error);
     $GLOBALS['fmTranslateInflight'] = null;
+    fm_release_retry($postId, $claimedAt); // bewerkt tijdens de aanvraag: nu mag de nieuwe tekst
+    if ($result !== null && $hint !== '' && ($result['source'] ?? null) !== null && $result['source'] !== $hint) {
+        // Alleen vastleggen (source/sourceHint kunnen fout zijn); blokkeert niets.
+        error_log('[forum-magnum] vertaling post ' . $postId . ': flow meldt source ' . $result['source'] . ', sourceHint was ' . $hint);
+    }
     if ($result !== null) {
         if (fm_store_translations($postId, $hash, $result['translations'], $result['source'])) {
             fm_db()->prepare("UPDATE posts SET translation_error = '' WHERE id = ?")->execute([$postId]);
@@ -392,8 +405,15 @@ function fm_queue_translations_on_view(array $posts, array $translationsByPost, 
         $status = (string) ($p['translation_status'] ?? '');
         $stale = fm_translation_pending_stale($p);
         $mode = null;
-        if ($status === '' || $stale) {
-            if (($translationsByPost[$id] ?? []) !== []) {
+        if ($status === 'retry') {
+            // Opnieuw aangevraagd (beheerder of bewerking). Loopt de oude aanvraag nog (verse claim), dan wachten.
+            $at = (int) ($p['translation_requested_at'] ?? 0);
+            if ($at > 0 && $at >= time() - fm_translate_stale_seconds()) {
+                continue;
+            }
+            $mode = 'new';
+        } elseif ($status === '' || $stale) {
+            if ($status === '' && ($translationsByPost[$id] ?? []) !== []) {
                 continue;
             }
             $mode = 'new';
@@ -415,17 +435,14 @@ function fm_queue_translations_on_view(array $posts, array $translationsByPost, 
     }
 }
 
-/** Vertaalde tekst voor de lezer, of null (zelfde taal als bron, of nog geen vertaling). */
+/** Vertaalde tekst voor de lezer, of null (nog geen vertaling voor die taal). */
 function fm_pick_translation(array $post, array $translations, string $lang): ?string
 {
-    // source_lang wordt alleen door de flow gezet; alleen een bevestigde brontaal = lezerstaal toont het origineel.
-    $source = (string) ($post['source_lang'] ?? '');
-    if ($source === $lang || !isset($translations[$lang])) {
-        return null;
-    }
-    $text = $translations[$lang];
+    // Tim: een niet-lege vertaling voor de lezerstaal altijd tonen, ook als source = lezerstaal
+    // (de flow meldt source soms fout). source_lang is alleen informatief.
+    $text = $translations[$lang] ?? null;
 
-    return trim($text) !== '' && $text !== (string) $post['body'] ? $text : null;
+    return is_string($text) && trim($text) !== '' ? $text : null;
 }
 
 /** Na zoveel mislukte pogingen verdwijnt het label 'Vertaling volgt' (de dagelijkse retry loopt door). */
@@ -441,10 +458,11 @@ function fm_translation_label_needed(array $post, array $translations, string $l
     if (fm_translate_config() === null || !empty($post['deleted_at']) || trim((string) ($post['body'] ?? '')) === '') {
         return false;
     }
-    if ((string) ($post['source_lang'] ?? '') === $lang || isset($translations[$lang])) {
-        return false;
-    }
     $status = (string) ($post['translation_status'] ?? '');
+    if (isset($translations[$lang])) {
+        // Bestaande vertaling: alleen een label tijdens een opnieuw-aanvraag (retry, of de pending-claim daarvan).
+        return $status === 'retry' || $status === 'pending';
+    }
     if ($status === 'done') {
         return false;
     }
@@ -494,13 +512,16 @@ function fm_translation_poll(array $ids, string $lang, bool $isAdmin = false): a
         $fresh = fm_get_post($id) ?? $p; // status na een eventuele claim
         $status = (string) ($fresh['translation_status'] ?? '');
         $row = ['status' => $status === '' ? 'none' : $status, 'label' => fm_translation_label_needed($fresh, $translations[$id] ?? [], $lang),
-            'badge' => fm_translation_badge_html($fresh, $translations[$id] ?? [], $lang, $isAdmin)];
-        $text = fm_pick_translation($fresh, $translations[$id] ?? [], $lang);
+            'badge' => fm_translation_badge_html($fresh, $translations[$id] ?? [], $lang, $isAdmin),
+            'poll' => fm_translation_poll_needed($fresh, $translations[$id] ?? [], $lang),
+            'next_retry_at' => fm_translation_next_retry_at($fresh)];
+        $text = $row['label'] ? null : fm_pick_translation($fresh, $translations[$id] ?? [], $lang);
         if ($text !== null) {
             $row['html'] = renderTicketMessageMarkdown($text, 0, $attachments[$id] ?? []);
             $row['lang'] = FM_LANGUAGES[$lang][1] ?? $lang;
             $row['label'] = false;
             $row['badge'] = '';
+            $row['poll'] = false;
         }
         $out[$id] = $row;
     }
@@ -540,9 +561,74 @@ function fm_translation_abort_guard(): void
         return;
     }
     try {
+        fm_release_retry((int) $inflight[0], (int) $inflight[1]);
         if (fm_mark_translation_failed((int) $inflight[0], (int) $inflight[1])) {
             fm_translation_error((int) $inflight[0], 'script afgebroken tijdens wachten op de flow (tijdslimiet?)');
         }
     } catch (Throwable) {
     }
+}
+
+/** Beheerder: opnieuw laten vertalen (bestaande vertalingen blijven tot de nieuwe binnen is). */
+function fm_can_request_retranslation(array $post): bool
+{
+    if (fm_translate_config() === null || !empty($post['deleted_at']) || trim((string) ($post['body'] ?? '')) === '') {
+        return false;
+    }
+    $status = (string) ($post['translation_status'] ?? '');
+
+    return $status !== 'retry' && !($status === 'pending' && !fm_translation_pending_stale($post));
+}
+
+function fm_request_retranslation(int $postId): bool
+{
+    $post = fm_get_post($postId);
+    if ($post === null || !fm_can_request_retranslation($post)) {
+        return false;
+    }
+    $st = fm_db()->prepare("UPDATE posts SET translation_status = 'retry', translation_requested_at = 0, translation_attempts = 0,
+        translation_failed_at = 0, translation_error = '' WHERE id = ? AND translation_status <> 'retry'
+        AND NOT (translation_status = 'pending' AND translation_requested_at >= ?)");
+    $st->execute([$postId, time() - fm_translate_stale_seconds()]);
+
+    return $st->rowCount() > 0;
+}
+
+/**
+ * Moet de pagina deze post blijven pollen? Zoals het label, maar zonder pogingenplafond:
+ * ook failed-posts (zonder label of met admin-badge) zodat de poll de retry kan starten.
+ */
+function fm_translation_poll_needed(array $post, array $translations, string $lang): bool
+{
+    if (fm_translate_config() === null || !empty($post['deleted_at']) || trim((string) ($post['body'] ?? '')) === '') {
+        return false;
+    }
+    $status = (string) ($post['translation_status'] ?? '');
+    if (isset($translations[$lang])) {
+        return $status === 'retry' || $status === 'pending';
+    }
+
+    return $status !== 'done';
+}
+
+/** Unix-tijd waarop een failed-post weer mag (0 = nu / n.v.t.). */
+function fm_translation_next_retry_at(array $post): int
+{
+    if (($post['translation_status'] ?? '') !== 'failed') {
+        return 0;
+    }
+    $failedAt = (int) ($post['translation_failed_at'] ?? 0);
+    if ($failedAt <= 0) {
+        return time() + fm_translation_backoff_seconds(1); // klok start bij deze poll
+    }
+    $at = $failedAt + fm_translation_backoff_seconds(max(1, (int) ($post['translation_attempts'] ?? 0)));
+
+    return $at > time() ? $at : 0;
+}
+
+/** Na afloop van een aanvraag: een 'retry' die op deze claim wachtte meteen claimbaar maken. */
+function fm_release_retry(int $postId, int $claimedAt): void
+{
+    fm_db()->prepare("UPDATE posts SET translation_requested_at = 0 WHERE id = ? AND translation_status = 'retry' AND translation_requested_at = ?")
+        ->execute([$postId, $claimedAt]);
 }

@@ -282,17 +282,37 @@ document.addEventListener('click', function (e) {
 // 'Vertaling volgt': zolang de pagina zichtbaar openstaat de eigen server vragen (5, 10, 20 … 60 s, max. ~15 min).
 (function () {
     var list = document.querySelector('.posts');
-    if (!list || !document.querySelector('[data-translation-pending]')) { return; }
-    var delays = [5000, 10000, 20000, 40000, 60000], step = 0, started = Date.now(), timer = null, busy = false;
-    function pendingIds() {
-        return Array.prototype.map.call(document.querySelectorAll('[data-translation-pending]'), function (el) { return el.getAttribute('data-translation-pending'); });
+    if (!list || !document.querySelector('[data-translation-poll]')) { return; }
+    var delays = [5000, 10000, 20000, 40000, 60000], step = 0, activeMs = 0, lastTick = Date.now(), timer = null, busy = false;
+    // 15 min telt alleen zichtbare tijd; elke id blijft gepolld tot er HTML staat of de server 'klaar/opgegeven' meldt.
+    function tick() { var now = Date.now(); if (!document.hidden) { activeMs += now - lastTick; } lastTick = now; }
+    // Gepolld wordt elke [data-translation-poll] (ook failed zonder label); nextAt = niet vóór de backoff-retry.
+    var nextAt = {}, dropped = {};
+    function pollIds() {
+        return Array.prototype.map.call(document.querySelectorAll('[data-translation-poll]'), function (el) { return el.getAttribute('data-translation-poll'); })
+            .filter(function (id) { return !dropped[id]; });
     }
+    function pendingIds() {
+        var now = Date.now();
+        return pollIds().filter(function (id) { return !nextAt[id] || nextAt[id] <= now; });
+    }
+    function remainingMs() { return 15 * 60000 - activeMs; }
     function apply(id, info) {
+        var ref = document.querySelector('[data-translation-poll="' + id + '"]');
+        if (info.poll === false && ref) { ref.removeAttribute('data-translation-poll'); }
+        if (info.next_retry_at) {
+            var at = info.next_retry_at * 1000;
+            if (at - Date.now() > remainingMs()) { dropped[id] = true; } else { nextAt[id] = at; }
+        } else { delete nextAt[id]; }
         var label = document.querySelector('[data-translation-pending="' + id + '"]');
         var post = document.getElementById('p' + id);
+        var inserted = false;
         if (info.html && post) {
-            var body = post.querySelector('[data-body]');
+            var existing = post.querySelector('[data-translated]');
+            if (existing) { existing.innerHTML = info.html; inserted = true; } // vernieuwde vertaling (opnieuw aangevraagd)
+            var body = existing ? null : post.querySelector('[data-body]');
             if (body) {
+                inserted = true;
                 var tr = document.createElement('div');
                 tr.className = 'post-body message-md';
                 tr.setAttribute('data-translated', '');
@@ -311,7 +331,11 @@ document.addEventListener('click', function (e) {
                 body.parentNode.insertBefore(btn, body.nextSibling);
             }
         }
-        if (label && (info.html || !info.label || info.badge)) {
+        // Label alleen weg als de vertaling echt in de DOM staat, of de server 'klaar/opgegeven' meldt.
+        if (inserted && ref) {
+            Array.prototype.forEach.call(ref.querySelectorAll('.translation-pending'), function (el) { if (el !== label) { el.remove(); } });
+        }
+        if (label && (inserted || (!info.html && (!info.label || info.badge)))) {
             if (info.badge && !info.html) { label.insertAdjacentHTML('afterend', info.badge.trim()); }
             label.remove();
         }
@@ -319,16 +343,28 @@ document.addEventListener('click', function (e) {
     function schedule() {
         clearTimeout(timer);
         timer = null;
-        if (document.hidden || !pendingIds().length || Date.now() - started > 15 * 60000) { return; }
-        timer = setTimeout(poll, delays[Math.min(step, delays.length - 1)]);
+        tick();
+        var ids = pollIds();
+        if (document.hidden || !ids.length || remainingMs() <= 0) { return; }
+        var delay = delays[Math.min(step, delays.length - 1)];
+        if (!pendingIds().length) {
+            // Alleen ids die op hun backoff wachten: rond het vroegste retry-tijdstip terugkomen.
+            var soonest = Math.min.apply(null, ids.map(function (id) { return nextAt[id] || Date.now(); }));
+            delay = Math.max(delay, soonest - Date.now() + 1000);
+        }
+        timer = setTimeout(poll, delay);
         step++;
     }
     function poll() {
         timer = null;
         var ids = pendingIds();
-        if (!ids.length || busy) { return; }
+        if (busy) { return; }
+        if (!ids.length) { schedule(); return; }
         busy = true;
-        fetch('translations.php?ids=' + ids.join(','), { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+        // Hangt de server (achtergrondvertaling in hetzelfde request), dan na 25 s afbreken en later opnieuw.
+        var ctrl = 'AbortController' in window ? new AbortController() : null;
+        var guard = ctrl ? setTimeout(function () { ctrl.abort(); }, 25000) : null;
+        fetch('translations.php?ids=' + ids.join(','), { credentials: 'same-origin', headers: { 'Accept': 'application/json' }, signal: ctrl ? ctrl.signal : undefined })
             .then(function (r) { if (!r.ok) { throw new Error('HTTP ' + r.status); } return r.json(); })
             .then(function (data) {
                 // Alleen ids die het antwoord expliciet noemt; ontbrekende ids blijven staan.
@@ -336,10 +372,11 @@ document.addEventListener('click', function (e) {
                 ids.forEach(function (id) { if (posts[id]) { apply(id, posts[id]); } });
             })
             .catch(function () {})
-            .then(function () { busy = false; schedule(); });
+            .then(function () { clearTimeout(guard); busy = false; schedule(); });
     }
     document.addEventListener('visibilitychange', function () {
-        if (document.hidden) { clearTimeout(timer); timer = null; } else if (!timer && !busy) { schedule(); }
+        tick();
+        if (document.hidden) { clearTimeout(timer); timer = null; } else if (!timer && !busy) { step = 0; schedule(); }
     });
     schedule();
 })();

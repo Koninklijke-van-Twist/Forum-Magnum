@@ -44,6 +44,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                     fm_normalize_uploads(), array_map('intval', (array) ($_POST['remove_attachment'] ?? [])));
                 $editDraft = null;
                 fm_redirect('post.php?id=' . $postId);
+            } elseif ($action === 'retranslate') {
+                $postId = (int) ($_POST['post'] ?? 0);
+                $post = fm_get_post($postId);
+                if (!$fmIsAdmin || $post === null || (int) $post['thread_id'] !== $threadId) {
+                    throw new RuntimeException('forbidden');
+                }
+                fm_request_retranslation($postId); // de poll op de pagina pakt 'retry' op
+                fm_redirect(fm_thread_url($threadId, fm_page_of_post($threadId, $postId), $postId));
             } elseif ($action === 'delete') {
                 $postId = (int) ($_POST['post'] ?? 0);
                 $post = fm_get_post($postId);
@@ -108,6 +116,12 @@ foreach ($posts as $post) {
     if ($canEdit && $editId !== $postId) {
         echo '<a href="' . h('thread.php?' . http_build_query(['id' => $threadId, 'p' => $page, 'edit' => $postId]) . '#p' . $postId) . '">' . h(fm_t('edit')) . '</a>';
     }
+    if ($fmIsAdmin && !$deleted && fm_translate_config() !== null) {
+        $canRetranslate = fm_can_request_retranslation($post);
+        echo '<form method="post">' . fm_csrf_field()
+            . '<input type="hidden" name="action" value="retranslate"><input type="hidden" name="post" value="' . $postId . '">'
+            . '<button type="submit"' . ($canRetranslate ? '' : ' disabled') . '>' . h(fm_t('retranslate')) . '</button></form>';
+    }
     if ($canDelete) {
         echo '<form method="post" data-confirm="' . h(fm_t('confirm_delete')) . '">' . fm_csrf_field()
             . '<input type="hidden" name="action" value="delete"><input type="hidden" name="post" value="' . $postId . '">'
@@ -146,8 +160,9 @@ foreach ($posts as $post) {
         }
     }
     // Voetregel over de volle breedte: links de permalink (#id, ook als post#id te citeren), rechts datum en bewerkt.
+    $pollNeeded = !$deleted && $editId !== $postId && fm_translation_poll_needed($post, $translationsByPost[$postId] ?? [], fm_lang());
     echo '<footer class="post-foot">'
-        . '<span class="post-ref"><a class="post-link" href="' . h(fm_thread_url($threadId, $page, $postId)) . '" title="' . h(fm_t('link_post') . ' (post#' . $postId . ')') . '">#' . $postId . '</a>'
+        . '<span class="post-ref"' . ($pollNeeded ? ' data-translation-poll="' . $postId . '"' : '') . '><a class="post-link" href="' . h(fm_thread_url($threadId, $page, $postId)) . '" title="' . h(fm_t('link_post') . ' (post#' . $postId . ')') . '">#' . $postId . '</a>'
         . (!$deleted && $editId !== $postId ? fm_translation_badge_html($post, $translationsByPost[$postId] ?? [], fm_lang(), $fmIsAdmin) : '')
         . '</span>'
         . '<span class="post-when"><time datetime="' . h(gmdate('c', (int) $post['created_at'])) . '">' . h(fm_format_time((int) $post['created_at'])) . '</time>'
