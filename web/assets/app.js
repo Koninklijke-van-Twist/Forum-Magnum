@@ -329,10 +329,11 @@ document.addEventListener('click', function (e) {
         if (!ids.length || busy) { return; }
         busy = true;
         fetch('translations.php?ids=' + ids.join(','), { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
-            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (r) { if (!r.ok) { throw new Error('HTTP ' + r.status); } return r.json(); })
             .then(function (data) {
+                // Alleen ids die het antwoord expliciet noemt; ontbrekende ids blijven staan.
                 var posts = (data && data.posts) || {};
-                ids.forEach(function (id) { if (posts[id]) { apply(id, posts[id]); } else { apply(id, { label: false }); } });
+                ids.forEach(function (id) { if (posts[id]) { apply(id, posts[id]); } });
             })
             .catch(function () {})
             .then(function () { busy = false; schedule(); });
