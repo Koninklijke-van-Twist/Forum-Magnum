@@ -278,14 +278,15 @@ document.addEventListener('click', function (e) {
     var label = b.textContent;
     b.textContent = b.getAttribute('data-alt');
     b.setAttribute('data-alt', label);
+    var details = b.closest('details');
+    if (details) { details.open = false; }
 });
 // 'Vertaling volgt': zolang de pagina zichtbaar openstaat de eigen server vragen (5, 10, 20 … 60 s, max. ~15 min).
 (function () {
     var list = document.querySelector('.posts');
     if (!list || !document.querySelector('[data-translation-poll]')) { return; }
-    var delays = [5000, 10000, 20000, 40000, 60000], step = 0, activeMs = 0, lastTick = Date.now(), timer = null, busy = false;
+    var delays = [5000, 10000, 20000, 40000, 60000], step = 0, usedMs = 0, visibleSince = document.hidden ? 0 : Date.now(), timer = null, busy = false;
     // 15 min telt alleen zichtbare tijd; elke id blijft gepolld tot er HTML staat of de server 'klaar/opgegeven' meldt.
-    function tick() { var now = Date.now(); if (!document.hidden) { activeMs += now - lastTick; } lastTick = now; }
     // Gepolld wordt elke [data-translation-poll] (ook failed zonder label); nextAt = niet vóór de backoff-retry.
     var nextAt = {}, dropped = {};
     function pollIds() {
@@ -296,7 +297,7 @@ document.addEventListener('click', function (e) {
         var now = Date.now();
         return pollIds().filter(function (id) { return !nextAt[id] || nextAt[id] <= now; });
     }
-    function remainingMs() { return 15 * 60000 - activeMs; }
+    function remainingMs() { return 15 * 60000 - (usedMs + (!document.hidden && visibleSince ? Date.now() - visibleSince : 0)); }
     function apply(id, info) {
         var ref = document.querySelector('[data-translation-poll="' + id + '"]');
         if (info.poll === false && ref) { ref.removeAttribute('data-translation-poll'); }
@@ -322,13 +323,16 @@ document.addEventListener('click', function (e) {
                 body.setAttribute('data-original', '');
                 body.hidden = true;
                 body.parentNode.insertBefore(tr, body);
-                var btn = document.createElement('button');
-                btn.type = 'button';
-                btn.className = 'translate-toggle';
-                btn.setAttribute('data-toggle-original', '');
-                btn.setAttribute('data-alt', list.getAttribute('data-show-translation') || '');
-                btn.textContent = list.getAttribute('data-show-original') || '';
-                body.parentNode.insertBefore(btn, body.nextSibling);
+                // Wisselknop in het ⋯-menu (vóór 'Kopieer link').
+                var menu = post.querySelector('.post-menu-list');
+                if (menu && !menu.querySelector('[data-toggle-original]')) {
+                    var btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.setAttribute('data-toggle-original', '');
+                    btn.setAttribute('data-alt', list.getAttribute('data-show-translation') || '');
+                    btn.textContent = list.getAttribute('data-show-original') || '';
+                    menu.insertBefore(btn, menu.firstChild);
+                }
             }
         }
         // Label alleen weg als de vertaling echt in de DOM staat, of de server 'klaar/opgegeven' meldt.
@@ -343,7 +347,6 @@ document.addEventListener('click', function (e) {
     function schedule() {
         clearTimeout(timer);
         timer = null;
-        tick();
         var ids = pollIds();
         if (document.hidden || !ids.length || remainingMs() <= 0) { return; }
         var delay = delays[Math.min(step, delays.length - 1)];
@@ -375,8 +378,20 @@ document.addEventListener('click', function (e) {
             .then(function () { clearTimeout(guard); busy = false; schedule(); });
     }
     document.addEventListener('visibilitychange', function () {
-        tick();
-        if (document.hidden) { clearTimeout(timer); timer = null; } else if (!timer && !busy) { step = 0; schedule(); }
+        var now = Date.now();
+        if (document.hidden) {
+            if (visibleSince) { usedMs += now - visibleSince; visibleSince = 0; }
+            clearTimeout(timer); timer = null;
+            return;
+        }
+        visibleSince = now;
+        // Zichtbaar met nog een label: budget en overgeslagen ids resetten en direct pollen.
+        if (document.querySelector('[data-translation-pending]')) {
+            if (remainingMs() <= 0) { usedMs = 0; visibleSince = now; }
+            dropped = {}; nextAt = {};
+            step = 0;
+            if (!busy) { clearTimeout(timer); timer = null; poll(); }
+        } else if (!timer && !busy) { step = 0; schedule(); }
     });
     schedule();
 })();
