@@ -131,6 +131,20 @@ check_same(86400, fm_translation_backoff_seconds(9), 'backoff: blijft dagelijks'
 
 $tFail = fm_create_thread('general', 'jan@kvt.nl', 'Fail', 'Mislukt bericht');
 $failId = fm_first_post_id($tFail);
+// Failed zonder failed_at: niet meteen klaar; klok wordt gestart
+$tNoClock = fm_create_thread('general', 'jan@kvt.nl', 'NoClock', 'Zonder klok');
+$noClockId = fm_first_post_id($tNoClock);
+fm_db()->prepare("UPDATE posts SET translation_status = 'failed', translation_failed_at = 0, translation_attempts = 0, translation_requested_at = 0 WHERE id = ?")
+    ->execute([$noClockId]);
+check(!fm_translation_failed_ready(fm_get_post($noClockId)), 'backoff: zonder failed_at niet ready');
+unset($GLOBALS['fmTranslateQueue']);
+fm_queue_translations_on_view([fm_get_post($noClockId)], []);
+check(!isset($GLOBALS['fmTranslateQueue'][$noClockId]), 'backoff: zonder failed_at niet meteen queue');
+$healed = fm_get_post($noClockId);
+check((int) $healed['translation_failed_at'] > 0, 'backoff: klok gestart bij weergave');
+check_same(1, (int) $healed['translation_attempts'], 'backoff: attempts minstens 1 na helen');
+check(!fm_translation_failed_ready($healed), 'backoff: net gehelde fail nog niet ready');
+
 // Verse fail (attempts=1, failed_at=nu): nog niet opnieuw
 fm_db()->prepare("UPDATE posts SET translation_status = 'failed', translation_failed_at = ?, translation_attempts = 1, translation_requested_at = 0 WHERE id = ?")
     ->execute([time(), $failId]);

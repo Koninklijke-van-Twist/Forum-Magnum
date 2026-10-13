@@ -56,7 +56,7 @@ try {
     }
     $result = cpt_parse_translations($raw, cpt_languages($config));
     if ($result === null) {
-        fm_db()->prepare("UPDATE posts SET translation_status = 'failed' WHERE id = ? AND translation_status = 'pending'")->execute([$postId]);
+        fm_mark_translation_failed($postId);
         fm_cb_reply(422, ['ok' => false, 'error' => 'unparseable']);
     }
     if (!fm_store_translations($postId, $hash, $result['translations'], $result['source'])) {

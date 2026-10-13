@@ -69,16 +69,19 @@ function fm_translation_pending_stale(array $post): bool
     return $at <= 0 || $at < time() - FM_TRANSLATE_STALE_SECONDS;
 }
 
-/** Failed waarvan de backoff verstreken is (of nooit een failed_at had). */
+/** Failed waarvan de backoff verstreken is. Zonder failed_at: alsof zojuist gefaald → nog niet klaar. */
 function fm_translation_failed_ready(array $post): bool
 {
     if (($post['translation_status'] ?? '') !== 'failed') {
         return false;
     }
     $failedAt = (int) ($post['translation_failed_at'] ?? 0);
+    if ($failedAt <= 0) {
+        return false;
+    }
     $attempts = max(1, (int) ($post['translation_attempts'] ?? 0));
 
-    return $failedAt <= 0 || time() >= $failedAt + fm_translation_backoff_seconds($attempts);
+    return time() >= $failedAt + fm_translation_backoff_seconds($attempts);
 }
 
 /**
@@ -112,12 +115,24 @@ function fm_claim_translation(int $postId, string $mode = 'any'): bool
     return $st->rowCount() > 0;
 }
 
+/**
+ * Alle failed-paden (sync-timeout, cURL, unparseable callback): failed_at=nu, attempts++.
+ * Failed zonder klok (legacy): start failed_at zonder extra attempt (minstens attempts=1).
+ */
 function fm_mark_translation_failed(int $postId): void
 {
+    if ($postId <= 0) {
+        return;
+    }
     $now = time();
     fm_db()->prepare("UPDATE posts SET translation_status = 'failed', translation_failed_at = ?,
-        translation_attempts = translation_attempts + 1
-        WHERE id = ? AND translation_status = 'pending'")->execute([$now, $postId]);
+        translation_attempts = CASE
+            WHEN translation_status = 'pending' THEN translation_attempts + 1
+            WHEN translation_attempts < 1 THEN 1
+            ELSE translation_attempts
+        END
+        WHERE id = ? AND (translation_status = 'pending'
+            OR (translation_status = 'failed' AND translation_failed_at = 0))")->execute([$now, $postId]);
 }
 
 /** Bericht na COMMIT laten vertalen; de request loopt (na fastcgi_finish_request) door in een shutdown-functie. */
@@ -285,8 +300,15 @@ function fm_queue_translations_on_view(array $posts, array $translationsByPost, 
                 continue;
             }
             $mode = 'new';
-        } elseif ($status === 'failed' && fm_translation_failed_ready($p)) {
-            $mode = 'failed';
+        } elseif ($status === 'failed') {
+            if ((int) ($p['translation_failed_at'] ?? 0) <= 0) {
+                // Backoff-klok starten (alsof zojuist gefaald); deze request nog niet opnieuw sturen.
+                fm_mark_translation_failed($id);
+                continue;
+            }
+            if (fm_translation_failed_ready($p)) {
+                $mode = 'failed';
+            }
         }
         if ($mode === null || !fm_claim_translation($id, $mode)) {
             continue;
