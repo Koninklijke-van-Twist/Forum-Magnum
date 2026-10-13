@@ -4,6 +4,14 @@ declare(strict_types=1);
 
 require __DIR__ . '/_bootstrap.php';
 
+// Pagina-requests queuen niets; alleen de worker (translations.php).
+$GLOBALS['copilotTranslate'] = ['flowUrl' => 'https://x.invalid', 'callbackSecret' => str_repeat('s', 20)];
+fm_queue_translations_on_view([['id' => 1, 'body' => 'x', 'translation_status' => '']], []);
+fm_queue_translation(1);
+check(!isset($GLOBALS['fmTranslateQueue']), 'zonder worker: geen queue in pagina-requests');
+$GLOBALS['copilotTranslate'] = null;
+fm_translation_worker(true);
+
 $L = ['nl', 'en', 'fr', 'de'];
 $ok = '{"source":"nl","nl":"Hallo","en":"Hello","fr":"Bonjour","de":"Hallo"}';
 $p = static fn (string $raw) => cpt_parse_translations($raw, $L);
@@ -246,6 +254,13 @@ fm_translation_abort_guard();
 check_same('failed', fm_get_post($gid)['translation_status'], 'guard: eigen claim failed');
 check(str_contains((string) fm_get_post($gid)['translation_error'], 'afgebroken'), 'guard: fout opgeslagen');
 $GLOBALS['fmTranslateQueue'] = [];
+
+// Na geslaagde store: fout gewist
+fm_db()->prepare("UPDATE posts SET translation_error = 'oud', translation_status = 'failed', translation_failed_at = 5 WHERE id = ?")->execute([$pid]);
+fm_store_translations($pid, fm_source_hash('Goedemorgen **allemaal**'), ['nl' => 'a', 'en' => 'b', 'fr' => 'c', 'de' => 'd'], 'nl');
+check_same('', fm_get_post($pid)['translation_error'], 'store: fout gewist');
+fm_edit_post($pid, 'jan@kvt.nl', 'Anders');
+check_same('', fm_get_post($pid)['translation_status'], 'edit: status terug naar nooit aangevraagd');
 
 // i18n
 foreach (['nl', 'en', 'fr', 'de'] as $lg) {
