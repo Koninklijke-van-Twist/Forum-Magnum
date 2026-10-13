@@ -401,7 +401,13 @@ function fm_edit_post(int $postId, string $email, string $body, ?string $title =
             // Oude vertalingen kloppen niet meer; source_hash laat late callbacks afketsen.
             $pdo->prepare('DELETE FROM post_translations WHERE post_id = ?')->execute([$postId]);
             // Status terug naar 'nooit aangevraagd': de poll (translations.php) pakt het op.
-            $pdo->prepare("UPDATE posts SET source_lang = '', translation_status = '', translation_requested_at = 0, translation_attempts = 0, translation_failed_at = 0, translation_error = '' WHERE id = ?")->execute([$postId]);
+            // Loopt er nog een verse aanvraag (oude tekst): 'retry' met de oude claim; die wordt vrijgegeven
+            // zodra de oude aanvraag klaar is (antwoord met oude hash wordt toch geweigerd).
+            $freshAfter = time() - (function_exists('fm_translate_stale_seconds') ? fm_translate_stale_seconds() : 360);
+            $pdo->prepare("UPDATE posts SET source_lang = '',
+                translation_status = CASE WHEN translation_status IN ('pending', 'retry') AND translation_requested_at >= ? THEN 'retry' ELSE '' END,
+                translation_requested_at = CASE WHEN translation_status IN ('pending', 'retry') AND translation_requested_at >= ? THEN translation_requested_at ELSE 0 END,
+                translation_attempts = 0, translation_failed_at = 0, translation_error = '' WHERE id = ?")->execute([$freshAfter, $freshAfter, $postId]);
             fm_queue_translation($postId);
         }
         fm_attach_files($pdo, $postId, $files, $now);

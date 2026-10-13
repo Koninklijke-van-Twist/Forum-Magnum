@@ -317,6 +317,33 @@ $r = fm_translation_poll([$nid], 'en');
 check(!isset($GLOBALS['fmTranslateQueue'][$nid]) && $r[$nid]['next_retry_at'] === time() + 600 && $r[$nid]['poll'] === true, 'poll: backoff respecteren + next_retry_at');
 $GLOBALS['fmTranslateQueue'] = [];
 
+// Bewerkt tijdens lopende aanvraag
+$oldText = 'Oude tekst die vertaald wordt, lang genoeg voor de check';
+$bid = fm_first_post_id(fm_create_thread('general', 'jan@kvt.nl', 'Bewerkt', $oldText));
+$t0 = time();
+fm_claim_translation($bid, 'any', $t0);
+$oldHash = fm_source_hash($oldText);
+fm_edit_post($bid, 'jan@kvt.nl', 'Nieuwe tekst na bewerking, ook lang genoeg hier');
+$bp = fm_get_post($bid);
+check_same('retry', $bp['translation_status'], 'bewerk: retry gemarkeerd tijdens lopende aanvraag');
+unset($GLOBALS['fmTranslateQueue']);
+fm_queue_translations_on_view([$bp], []);
+check(!isset($GLOBALS['fmTranslateQueue'][$bid]), 'bewerk: wacht op oude aanvraag');
+check(!fm_store_translations($bid, $oldHash, ['nl' => 'a', 'en' => 'b', 'fr' => 'c', 'de' => 'd'], 'nl'), 'bewerk: oude hash volledig geweigerd');
+check_same([], fm_translations_for_posts([fm_get_post($bid)]), 'bewerk: geen oude vertaling (ook geen fr) zichtbaar');
+fm_db()->prepare("INSERT INTO post_translations (post_id, lang, text, source_hash, updated_at) VALUES (?, 'fr', 'vieux', ?, 1)")->execute([$bid, $oldHash]);
+check_same([], fm_translations_for_posts([fm_get_post($bid)]), 'bewerk: rij met oude hash nooit getoond');
+fm_release_retry($bid, $t0);
+unset($GLOBALS['fmTranslateQueue']);
+fm_queue_translations_on_view([fm_get_post($bid)], []);
+check(isset($GLOBALS['fmTranslateQueue'][$bid]), 'bewerk: na afloop oude aanvraag nieuwe geclaimd');
+$GLOBALS['fmTranslateQueue'] = [];
+// Bewerkt zonder lopende aanvraag: gewoon ''
+$cid = fm_first_post_id(fm_create_thread('general', 'jan@kvt.nl', 'B2', $oldText));
+fm_db()->prepare("UPDATE posts SET translation_status = 'done' WHERE id = ?")->execute([$cid]);
+fm_edit_post($cid, 'jan@kvt.nl', 'Iets anders');
+check_same('', fm_get_post($cid)['translation_status'], 'bewerk: zonder lopende aanvraag status leeg');
+
 // i18n
 foreach (['nl', 'en', 'fr', 'de'] as $lg) {
     foreach (['translation_pending', 'translation_failed', 'translation_error_title', 'translation_attempts_n', 'translation_last_try'] as $k) {

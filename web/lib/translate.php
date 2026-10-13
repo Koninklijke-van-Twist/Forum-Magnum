@@ -315,6 +315,7 @@ function fm_translate_post(int $postId, ?float $timeout = null): void
     $result = cpt_send($config, (string) $postId, $body, $hint !== '' ? $hint : null, $callbackUrl, $token,
         fm_translate_sync_timeout($config, $timeout), $status, $error);
     $GLOBALS['fmTranslateInflight'] = null;
+    fm_release_retry($postId, $claimedAt); // bewerkt tijdens de aanvraag: nu mag de nieuwe tekst
     if ($result !== null) {
         if (fm_store_translations($postId, $hash, $result['translations'], $result['source'])) {
             fm_db()->prepare("UPDATE posts SET translation_error = '' WHERE id = ?")->execute([$postId]);
@@ -423,7 +424,12 @@ function fm_queue_translations_on_view(array $posts, array $translationsByPost, 
         $stale = fm_translation_pending_stale($p);
         $mode = null;
         if ($status === 'retry') {
-            $mode = 'new'; // beheerder vroeg opnieuw aan: ook met bestaande vertalingen
+            // Opnieuw aangevraagd (beheerder of bewerking). Loopt de oude aanvraag nog (verse claim), dan wachten.
+            $at = (int) ($p['translation_requested_at'] ?? 0);
+            if ($at > 0 && $at >= time() - fm_translate_stale_seconds()) {
+                continue;
+            }
+            $mode = 'new';
         } elseif ($status === '' || $stale) {
             if ($status === '' && ($translationsByPost[$id] ?? []) !== []) {
                 continue;
@@ -579,6 +585,7 @@ function fm_translation_abort_guard(): void
         return;
     }
     try {
+        fm_release_retry((int) $inflight[0], (int) $inflight[1]);
         if (fm_mark_translation_failed((int) $inflight[0], (int) $inflight[1])) {
             fm_translation_error((int) $inflight[0], 'script afgebroken tijdens wachten op de flow (tijdslimiet?)');
         }
@@ -667,4 +674,11 @@ function fm_translation_next_retry_at(array $post): int
     $at = $failedAt + fm_translation_backoff_seconds(max(1, (int) ($post['translation_attempts'] ?? 0)));
 
     return $at > time() ? $at : 0;
+}
+
+/** Na afloop van een aanvraag: een 'retry' die op deze claim wachtte meteen claimbaar maken. */
+function fm_release_retry(int $postId, int $claimedAt): void
+{
+    fm_db()->prepare("UPDATE posts SET translation_requested_at = 0 WHERE id = ? AND translation_status = 'retry' AND translation_requested_at = ?")
+        ->execute([$postId, $claimedAt]);
 }
