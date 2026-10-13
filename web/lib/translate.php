@@ -316,6 +316,10 @@ function fm_translate_post(int $postId, ?float $timeout = null): void
         fm_translate_sync_timeout($config, $timeout), $status, $error);
     $GLOBALS['fmTranslateInflight'] = null;
     fm_release_retry($postId, $claimedAt); // bewerkt tijdens de aanvraag: nu mag de nieuwe tekst
+    if ($result !== null && $hint !== '' && ($result['source'] ?? null) !== null && $result['source'] !== $hint) {
+        // Alleen vastleggen (source/sourceHint kunnen fout zijn); blokkeert niets.
+        error_log('[forum-magnum] vertaling post ' . $postId . ': flow meldt source ' . $result['source'] . ', sourceHint was ' . $hint);
+    }
     if ($result !== null) {
         if (fm_store_translations($postId, $hash, $result['translations'], $result['source'])) {
             fm_db()->prepare("UPDATE posts SET translation_error = '' WHERE id = ?")->execute([$postId]);
@@ -342,28 +346,10 @@ function fm_store_translations(int $postId, string $hash, array $translations, ?
         $now = time();
         $st = $pdo->prepare('INSERT INTO post_translations (post_id, lang, text, source_hash, updated_at) VALUES (?,?,?,?,?)
             ON CONFLICT(post_id, lang) DO UPDATE SET text = excluded.text, source_hash = excluded.source_hash, updated_at = excluded.updated_at');
-        $echoed = [];
-        // Alleen de source die de flow nu meldt; nooit de UI-taal/vlag van de auteur. Zonder source: geen check.
-        $knownSource = (string) ($source ?? '');
         foreach ($translations as $lang => $text) {
-            if (!array_key_exists((string) $lang, FM_LANGUAGES) || !is_string($text)) {
-                continue;
+            if (array_key_exists((string) $lang, FM_LANGUAGES) && is_string($text)) {
+                $st->execute([$postId, (string) $lang, fm_clean_text($text, 40000), $hash, $now]);
             }
-            if (fm_translation_is_echo((string) $post['body'], $text, (string) $lang, $knownSource)) {
-                // Flow gaf voor deze taal de brontekst terug: niet opslaan, later opnieuw.
-                $echoed[] = (string) $lang;
-                continue;
-            }
-            $st->execute([$postId, (string) $lang, fm_clean_text($text, 40000), $hash, $now]);
-        }
-        if ($echoed !== []) {
-            $msg = 'flow gaf origineel terug voor: ' . implode(', ', $echoed) . ' (bron ' . ($knownSource ?: '?') . ')';
-            error_log('[forum-magnum] vertaling post ' . $postId . ': ' . $msg);
-            $pdo->prepare("UPDATE posts SET translation_status = 'failed', translation_failed_at = ?, translation_attempts = translation_attempts + 1,
-                translation_error = ?, source_lang = CASE WHEN ? <> '' THEN ? ELSE source_lang END WHERE id = ?")
-                ->execute([$now, $msg, (string) $source, (string) $source, $postId]);
-
-            return true;
         }
         $pdo->prepare("UPDATE posts SET translation_status = 'done', translation_attempts = 0, translation_failed_at = 0, translation_error = '',
             source_lang = CASE WHEN ? <> '' THEN ? ELSE source_lang END WHERE id = ?")
@@ -377,11 +363,9 @@ function fm_store_translations(int $postId, string $hash, array $translations, ?
 function fm_translations_for_posts(array $posts): array
 {
     $hashes = [];
-    $byId = [];
     foreach ($posts as $p) {
         if (empty($p['deleted_at'])) {
             $hashes[(int) $p['id']] = fm_source_hash((string) $p['body']);
-            $byId[(int) $p['id']] = $p;
         }
     }
     if ($hashes === []) {
@@ -391,9 +375,7 @@ function fm_translations_for_posts(array $posts): array
     $st->execute(array_keys($hashes));
     $out = [];
     foreach ($st->fetchAll() as $row) {
-        $p = $byId[(int) $row['post_id']] ?? null;
-        if (($hashes[(int) $row['post_id']] ?? '') === $row['source_hash']
-            && !($p !== null && fm_translation_is_echo((string) $p['body'], (string) $row['text'], (string) $row['lang'], (string) ($p['source_lang'] ?? '')))) {
+        if (($hashes[(int) $row['post_id']] ?? '') === $row['source_hash']) {
             $out[(int) $row['post_id']][(string) $row['lang']] = (string) $row['text'];
         }
     }
@@ -453,17 +435,14 @@ function fm_queue_translations_on_view(array $posts, array $translationsByPost, 
     }
 }
 
-/** Vertaalde tekst voor de lezer, of null (zelfde taal als bron, of nog geen vertaling). */
+/** Vertaalde tekst voor de lezer, of null (nog geen vertaling voor die taal). */
 function fm_pick_translation(array $post, array $translations, string $lang): ?string
 {
-    // source_lang wordt alleen door de flow gezet; alleen een bevestigde brontaal = lezerstaal toont het origineel.
-    $source = (string) ($post['source_lang'] ?? '');
-    if ($source === $lang || !isset($translations[$lang])) {
-        return null;
-    }
-    $text = $translations[$lang];
+    // Tim: een niet-lege vertaling voor de lezerstaal altijd tonen, ook als source = lezerstaal
+    // (de flow meldt source soms fout). source_lang is alleen informatief.
+    $text = $translations[$lang] ?? null;
 
-    return trim($text) !== '' && $text !== (string) $post['body'] ? $text : null;
+    return is_string($text) && trim($text) !== '' ? $text : null;
 }
 
 /** Na zoveel mislukte pogingen verdwijnt het label 'Vertaling volgt' (de dagelijkse retry loopt door). */
@@ -480,9 +459,6 @@ function fm_translation_label_needed(array $post, array $translations, string $l
         return false;
     }
     $status = (string) ($post['translation_status'] ?? '');
-    if ((string) ($post['source_lang'] ?? '') === $lang) {
-        return false;
-    }
     if (isset($translations[$lang])) {
         // Bestaande vertaling: alleen een label tijdens een opnieuw-aanvraag (retry, of de pending-claim daarvan).
         return $status === 'retry' || $status === 'pending';
@@ -593,29 +569,6 @@ function fm_translation_abort_guard(): void
     }
 }
 
-/**
- * Vertaling die (genormaliseerd) gelijk is aan het origineel terwijl de door de flow gemelde bron
- * bekend én anders is. Korte/taalneutrale teksten (< 20 letters na weghalen van links, code,
- * vermeldingen en post#-verwijzingen) worden nooit afgekeurd.
- */
-function fm_translation_is_echo(string $body, string $text, string $lang, string $source): bool
-{
-    if ($source === '' || $source === $lang || fm_text_language_neutral($body)) {
-        return false;
-    }
-    $norm = static fn (string $t): string => mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $t)));
-
-    return $norm($text) !== '' && $norm($text) === $norm($body);
-}
-
-function fm_text_language_neutral(string $body): bool
-{
-    $t = (string) preg_replace(['/```.*?```/s', '/`[^`]*`/', '~https?://\S+~i', '/@[\w.\-]+/u', '/post#\d+/i', '/#\d+/'], ' ', $body);
-    $letters = (int) preg_match_all('/\p{L}/u', $t);
-
-    return $letters < 20;
-}
-
 /** Beheerder: opnieuw laten vertalen (bestaande vertalingen blijven tot de nieuwe binnen is). */
 function fm_can_request_retranslation(array $post): bool
 {
@@ -651,9 +604,6 @@ function fm_translation_poll_needed(array $post, array $translations, string $la
         return false;
     }
     $status = (string) ($post['translation_status'] ?? '');
-    if ((string) ($post['source_lang'] ?? '') === $lang) {
-        return false;
-    }
     if (isset($translations[$lang])) {
         return $status === 'retry' || $status === 'pending';
     }
