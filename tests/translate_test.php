@@ -264,17 +264,29 @@ fm_edit_post($pid, 'jan@kvt.nl', 'Anders');
 check_same('', fm_get_post($pid)['translation_status'], 'edit: status terug naar nooit aangevraagd');
 
 // Echo: flow geeft voor fr de brontekst terug
-$eid = fm_first_post_id(fm_create_thread('general', 'jan@kvt.nl', 'Echo', 'Goedemorgen allemaal'));
-fm_store_translations($eid, fm_source_hash('Goedemorgen allemaal'), ['nl' => 'Goedemorgen allemaal', 'en' => 'Good morning all', 'fr' => " goedemorgen  allemaal\n", 'de' => 'Guten Morgen'], 'nl');
+$eid = fm_first_post_id(fm_create_thread('general', 'jan@kvt.nl', 'Echo', 'Goedemorgen allemaal, tot straks bij de koffie'));
+fm_store_translations($eid, fm_source_hash('Goedemorgen allemaal, tot straks bij de koffie'), ['nl' => 'Goedemorgen allemaal, tot straks bij de koffie', 'en' => 'Good morning all', 'fr' => " goedemorgen  allemaal, tot straks bij de koffie\n", 'de' => 'Guten Morgen'], 'nl');
 $ep = fm_get_post($eid);
 $etr = fm_translations_for_posts([$ep]);
 check(!isset($etr[$eid]['fr']) && isset($etr[$eid]['en']), 'echo: fr niet opgeslagen, en wel');
 check_same('failed', $ep['translation_status'], 'echo: failed voor retry');
 check(str_contains((string) $ep['translation_error'], 'fr'), 'echo: fout noemt fr');
 check(fm_translation_label_needed($ep, $etr[$eid] ?? [], 'fr'), 'echo: fr-lezer houdt label');
-check(fm_translation_is_echo('Hallo', 'hallo ', 'fr', 'nl') && !fm_translation_is_echo('Hallo', 'Hallo', 'nl', 'nl') && !fm_translation_is_echo('Hallo', 'Hallo', 'fr', ''), 'echo: normalisatie en randgevallen');
+$long = 'Goedemorgen allemaal, de vergadering begint om tien uur';
+check(fm_translation_is_echo($long, ' goedemorgen allemaal,  de vergadering begint om tien uur', 'fr', 'nl'), 'echo: normalisatie');
+check(!fm_translation_is_echo($long, $long, 'nl', 'nl'), 'echo: NL-post, nl = origineel mag');
+check(!fm_translation_is_echo($long, $long, 'fr', ''), 'echo: zonder source geen check');
+check(!fm_translation_is_echo('Hallo Piet', 'Hallo Piet', 'fr', 'nl'), 'echo: korte tekst nooit afgekeurd');
+check(!fm_translation_is_echo('Zie https://example.com/a/b/c/d `code_blok_hier` @piet.jansen', 'Zie https://example.com/a/b/c/d `code_blok_hier` @piet.jansen', 'fr', 'nl'), 'echo: link/code/naam neutraal');
+// EN-post van een FR-gebruiker: hint fr telt niet, source en = origineel mag; fr gelijk = echo
+fm_set_lang('marie@kvt.nl', 'fr');
+$enText = 'Good morning everyone, the meeting starts at ten o clock';
+$enId = fm_first_post_id(fm_create_thread('general', 'marie@kvt.nl', 'EN', $enText));
+fm_store_translations($enId, fm_source_hash($enText), ['nl' => 'Goedemorgen allemaal, de vergadering begint om tien uur', 'en' => $enText, 'fr' => 'Bonjour à tous, la réunion commence à dix heures', 'de' => 'Guten Morgen, das Treffen beginnt um zehn Uhr'], 'en');
+check_same('done', fm_get_post($enId)['translation_status'], 'echo: EN-post van FR-gebruiker done (en = origineel ok)');
+check_same(4, count(fm_translations_for_posts([fm_get_post($enId)])[$enId] ?? []), 'echo: alle 4 rijen bewaard');
 // Oude echo-rij in de DB telt als ontbrekend
-fm_db()->prepare("INSERT OR REPLACE INTO post_translations (post_id, lang, text, source_hash, updated_at) VALUES (?, 'fr', 'Goedemorgen allemaal', ?, 1)")->execute([$eid, fm_source_hash('Goedemorgen allemaal')]);
+fm_db()->prepare("INSERT OR REPLACE INTO post_translations (post_id, lang, text, source_hash, updated_at) VALUES (?, 'fr', 'Goedemorgen allemaal, tot straks bij de koffie', ?, 1)")->execute([$eid, fm_source_hash('Goedemorgen allemaal, tot straks bij de koffie')]);
 check(!isset(fm_translations_for_posts([fm_get_post($eid)])[$eid]['fr']), 'echo: bestaande echo-rij genegeerd');
 
 // Opnieuw aanvragen

@@ -342,7 +342,8 @@ function fm_store_translations(int $postId, string $hash, array $translations, ?
         $st = $pdo->prepare('INSERT INTO post_translations (post_id, lang, text, source_hash, updated_at) VALUES (?,?,?,?,?)
             ON CONFLICT(post_id, lang) DO UPDATE SET text = excluded.text, source_hash = excluded.source_hash, updated_at = excluded.updated_at');
         $echoed = [];
-        $knownSource = (string) ($source ?? '') !== '' ? (string) $source : (string) ($post['source_lang'] ?? '');
+        // Alleen de source die de flow nu meldt; nooit de UI-taal/vlag van de auteur. Zonder source: geen check.
+        $knownSource = (string) ($source ?? '');
         foreach ($translations as $lang => $text) {
             if (!array_key_exists((string) $lang, FM_LANGUAGES) || !is_string($text)) {
                 continue;
@@ -585,15 +586,27 @@ function fm_translation_abort_guard(): void
     }
 }
 
-/** Vertaling die (genormaliseerd) gelijk is aan het origineel terwijl de bron bekend én anders is. */
+/**
+ * Vertaling die (genormaliseerd) gelijk is aan het origineel terwijl de door de flow gemelde bron
+ * bekend én anders is. Korte/taalneutrale teksten (< 20 letters na weghalen van links, code,
+ * vermeldingen en post#-verwijzingen) worden nooit afgekeurd.
+ */
 function fm_translation_is_echo(string $body, string $text, string $lang, string $source): bool
 {
-    if ($source === '' || $source === $lang) {
+    if ($source === '' || $source === $lang || fm_text_language_neutral($body)) {
         return false;
     }
     $norm = static fn (string $t): string => mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $t)));
 
     return $norm($text) !== '' && $norm($text) === $norm($body);
+}
+
+function fm_text_language_neutral(string $body): bool
+{
+    $t = (string) preg_replace(['/```.*?```/s', '/`[^`]*`/', '~https?://\S+~i', '/@[\w.\-]+/u', '/post#\d+/i', '/#\d+/'], ' ', $body);
+    $letters = (int) preg_match_all('/\p{L}/u', $t);
+
+    return $letters < 20;
 }
 
 /** Beheerder: opnieuw laten vertalen (bestaande vertalingen blijven tot de nieuwe binnen is). */
