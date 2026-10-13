@@ -10,6 +10,7 @@ declare(strict_types=1);
  * reads       per gebruiker per thread het laatst gelezen bericht.
  * user_prefs  taal per gebruiker.
  * directory   server-side cache van Entra-gebruikersinfo.
+ * post_translations  automatische vertalingen per bericht en taal (zie translate.php).
  * post_attachments  bijlagen per bericht (bestand op schijf via SHA-256, zie attachments.php).
  */
 
@@ -19,7 +20,7 @@ const FM_THREADS_PER_PAGE = 20;
 const FM_HOME_PER_PAGE = ['announcements' => 5, 'work' => 10, 'general' => 10];
 const FM_POSTS_PER_PAGE = 50;
 /** Schemaversie in PRAGMA user_version; verhogen bij elke schemawijziging. */
-const FM_SCHEMA_VERSION = 3;
+const FM_SCHEMA_VERSION = 6;
 
 function fm_data_dir(): string
 {
@@ -148,6 +149,41 @@ function fm_migrate(PDO $pdo): void
             foreach ($pdo->query('SELECT DISTINCT author FROM posts')->fetchAll(PDO::FETCH_COLUMN) as $author) {
                 $pdo->prepare('INSERT OR IGNORE INTO known_users (email, mention_id) VALUES (?, ?)')
                     ->execute([(string) $author, fm_mention_id((string) $author)]);
+            }
+        }
+        if ($version < 4) {
+            // Automatische vertaling: brontaal + status per bericht, vertalingen per taal.
+            $cols = array_column($pdo->query('PRAGMA table_info(posts)')->fetchAll(), 'name');
+            if (!in_array('source_lang', $cols, true)) {
+                $pdo->exec("ALTER TABLE posts ADD COLUMN source_lang TEXT NOT NULL DEFAULT ''");
+            }
+            if (!in_array('translation_status', $cols, true)) {
+                $pdo->exec("ALTER TABLE posts ADD COLUMN translation_status TEXT NOT NULL DEFAULT ''");
+            }
+            $pdo->exec('CREATE TABLE IF NOT EXISTS post_translations (
+                post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+                lang TEXT NOT NULL,
+                text TEXT NOT NULL,
+                source_hash TEXT NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (post_id, lang)
+            )');
+        }
+        if ($version < 5) {
+            // Tijdstip van pending-claim: stale pending (>~5 min) mag opnieuw gequeued worden.
+            $cols = array_column($pdo->query('PRAGMA table_info(posts)')->fetchAll(), 'name');
+            if (!in_array('translation_requested_at', $cols, true)) {
+                $pdo->exec('ALTER TABLE posts ADD COLUMN translation_requested_at INTEGER NOT NULL DEFAULT 0');
+            }
+        }
+        if ($version < 6) {
+            // Backoff bij mislukte sync-vertalingen.
+            $cols = array_column($pdo->query('PRAGMA table_info(posts)')->fetchAll(), 'name');
+            if (!in_array('translation_failed_at', $cols, true)) {
+                $pdo->exec('ALTER TABLE posts ADD COLUMN translation_failed_at INTEGER NOT NULL DEFAULT 0');
+            }
+            if (!in_array('translation_attempts', $cols, true)) {
+                $pdo->exec('ALTER TABLE posts ADD COLUMN translation_attempts INTEGER NOT NULL DEFAULT 0');
             }
         }
         $pdo->exec('PRAGMA user_version = ' . FM_SCHEMA_VERSION);
@@ -298,6 +334,9 @@ function fm_insert_post(PDO $pdo, int $threadId, string $email, string $body, in
     $pdo->prepare('UPDATE threads SET last_post_at = ?, last_post_id = ?, last_author = ?, post_count = post_count + 1 WHERE id = ?')
         ->execute([$now, $postId, $email, $threadId]);
     fm_mark_read($threadId, $email, $postId);
+    if (function_exists('fm_queue_translation')) {
+        fm_queue_translation($postId);
+    }
 
     return $postId;
 }
@@ -346,6 +385,12 @@ function fm_edit_post(int $postId, string $email, string $body, ?string $title =
         $pdo->prepare('UPDATE posts SET body = ?, edited_at = ?, edited_by = ? WHERE id = ?')
             ->execute([$body, $now, strtolower($email), $postId]);
         fm_sync_mentions($pdo, $postId, $body, (string) $post['author']);
+        if ($body !== (string) $post['body'] && function_exists('fm_queue_translation')) {
+            // Oude vertalingen kloppen niet meer; source_hash laat late callbacks afketsen.
+            $pdo->prepare('DELETE FROM post_translations WHERE post_id = ?')->execute([$postId]);
+            $pdo->prepare("UPDATE posts SET source_lang = '', translation_attempts = 0, translation_failed_at = 0 WHERE id = ?")->execute([$postId]);
+            fm_queue_translation($postId);
+        }
         fm_attach_files($pdo, $postId, $files, $now);
         if ($title !== null && fm_first_post_id((int) $post['thread_id']) === $postId) {
             $title = fm_clean_text(str_replace("\n", ' ', $title), 150);
@@ -378,6 +423,8 @@ function fm_delete_post(int $postId, string $email): void
         // Koppelingen weg; het bestand alleen als niemand er nog naar verwijst.
         fm_detach_files($pdo, $postId);
         $pdo->prepare('DELETE FROM mentions WHERE post_id = ?')->execute([$postId]);
+        $pdo->prepare('DELETE FROM post_translations WHERE post_id = ?')->execute([$postId]);
+        $pdo->prepare("UPDATE posts SET translation_status = '', translation_requested_at = 0, translation_failed_at = 0, translation_attempts = 0 WHERE id = ?")->execute([$postId]);
         fm_refresh_thread_meta((int) $post['thread_id']);
     });
 }

@@ -224,3 +224,7 @@ form.inline { display: inline; }
 /* Korte bevestiging (bv. 'Link gekopieerd') */
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 100; background: #14202e; color: #fff; padding: 8px 14px; border-radius: 8px; font-size: .9rem; box-shadow: 0 6px 20px rgba(0,0,0,.25); transition: opacity .3s; pointer-events: none; }
 .toast.hide { opacity: 0; }
+/* Automatische vertaling: klein wisselknopje onder het bericht. */
+.post-body[hidden] { display: none; }
+.translate-toggle { border: 0; background: none; padding: 0; margin: 4px 0 0; font: inherit; font-size: .8rem; color: var(--muted); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.translate-toggle:hover { color: var(--text); }

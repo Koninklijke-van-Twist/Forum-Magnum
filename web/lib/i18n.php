@@ -15,6 +15,8 @@ function fm_strings(): array
     return [
         'nl' => [
             'copy_link' => 'Kopieer link',
+            'show_original' => 'Origineel tonen',
+            'show_translation' => 'Vertaling tonen',
             'link_copied' => 'Link gekopieerd',
             'months_short' => 'jan,feb,mrt,apr,mei,jun,jul,aug,sep,okt,nov,dec',
             'weekdays_short' => 'ma,di,wo,do,vr,za,zo',
@@ -70,6 +72,8 @@ function fm_strings(): array
         ],
         'fr' => [
             'copy_link' => 'Copier le lien',
+            'show_original' => 'Afficher l’original',
+            'show_translation' => 'Afficher la traduction',
             'link_copied' => 'Lien copié',
             'months_short' => 'janv,févr,mars,avr,mai,juin,juil,août,sept,oct,nov,déc',
             'weekdays_short' => 'lu,ma,me,je,ve,sa,di',
@@ -125,6 +129,8 @@ function fm_strings(): array
         ],
         'de' => [
             'copy_link' => 'Link kopieren',
+            'show_original' => 'Original anzeigen',
+            'show_translation' => 'Übersetzung anzeigen',
             'link_copied' => 'Link kopiert',
             'months_short' => 'Jan,Feb,Mär,Apr,Mai,Jun,Jul,Aug,Sep,Okt,Nov,Dez',
             'weekdays_short' => 'Mo,Di,Mi,Do,Fr,Sa,So',
@@ -180,6 +186,8 @@ function fm_strings(): array
         ],
         'en' => [
             'copy_link' => 'Copy link',
+            'show_original' => 'Show original',
+            'show_translation' => 'Show translation',
             'link_copied' => 'Link copied',
             'months_short' => 'Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec',
             'weekdays_short' => 'Mo,Tu,We,Th,Fr,Sa,Su',

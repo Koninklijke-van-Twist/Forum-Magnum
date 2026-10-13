@@ -31,3 +31,13 @@ $forumAdmins = [
 
 // Optioneel: Asclepius-adres voor ticketverwijzingen (#1185).
 // $asclepiusBaseUrl = 'https://sleutels.kvt.nl/asclepius';
+
+// Optioneel: automatische vertaling van berichten via een Power Automate-flow met een
+// Copilot/AI Builder-prompt (zie docs/power-automate-translate.md). Zonder deze config
+// wordt er niets vertaald en werkt het forum zoals altijd.
+// $copilotTranslate = [
+//     'flowUrl' => 'https://prod-00.westeurope.logic.azure.com:443/workflows/.../triggers/manual/paths/invoke?...',
+//     'callbackSecret' => 'MINIMAAL-16-TEKENS-WILLEKEURIG', // bijv. bin2hex(random_bytes(32))
+//     // 'callbackBaseUrl' => 'https://sleutels.kvt.nl/forum-magnum', // optioneel, anders uit de request
+//     // 'syncTimeout' => 90, // seconden wachten op een synchrone Response (na het antwoord aan de browser)
+// ];
