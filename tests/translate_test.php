@@ -86,7 +86,7 @@ $GLOBALS['fmTranslateQueue'] = [];
 
 // Stale pending (>5 min) mag opnieuw
 fm_db()->prepare('UPDATE posts SET translation_status = ?, translation_requested_at = ? WHERE id = ?')
-    ->execute(['pending', time() - FM_TRANSLATE_STALE_SECONDS - 10, $lazyId]);
+    ->execute(['pending', time() - fm_translate_stale_seconds() - 10, $lazyId]);
 unset($GLOBALS['fmTranslateQueue']);
 fm_queue_translations_on_view([fm_get_post($lazyId)], []);
 check(isset($GLOBALS['fmTranslateQueue'][$lazyId]), 'lazy: stale pending opnieuw in wachtrij');
@@ -177,6 +177,82 @@ unset($GLOBALS['fmTranslateQueue']);
 fm_queue_translations_on_view([fm_get_post($failId)], []);
 check(isset($GLOBALS['fmTranslateQueue'][$failId]), 'backoff: na 1u wel');
 $GLOBALS['fmTranslateQueue'] = [];
+
+// Heal raakt geen pending; mark_failed alleen met eigen claim
+fm_db()->prepare("UPDATE posts SET translation_status = 'pending', translation_requested_at = ?, translation_failed_at = 0 WHERE id = ?")->execute([time(), $noClockId]);
+fm_start_failed_clock($noClockId);
+check_same('pending', fm_get_post($noClockId)['translation_status'], 'heal: pending blijft pending');
+fm_mark_translation_failed($noClockId, 12345);
+check_same('pending', fm_get_post($noClockId)['translation_status'], 'mark_failed: andere claim niet overschreven');
+fm_db()->prepare("UPDATE posts SET translation_status = 'done' WHERE id = ?")->execute([$noClockId]);
+fm_mark_translation_failed($noClockId);
+check_same('done', fm_get_post($noClockId)['translation_status'], 'mark_failed: done niet overschreven');
+
+// Label + poll
+$lp = ['id' => 1, 'body' => 'Hallo', 'deleted_at' => null, 'source_lang' => '', 'translation_status' => 'pending', 'translation_attempts' => 0];
+check(fm_translation_label_needed($lp, [], 'en'), 'label: onbekende bron, geen vertaling');
+check(!fm_translation_label_needed(['source_lang' => 'en'] + $lp, [], 'en'), 'label: bron = lezerstaal');
+check(!fm_translation_label_needed($lp, ['en' => 'Hello'], 'en'), 'label: vertaling er al');
+check(!fm_translation_label_needed(['translation_status' => 'done'] + $lp, [], 'en'), 'label: done');
+check(fm_translation_label_needed(['translation_status' => 'failed', 'translation_attempts' => 1] + $lp, [], 'en'), 'label: failed met pogingen over');
+check(!fm_translation_label_needed(['translation_status' => 'failed', 'translation_attempts' => FM_TRANSLATE_LABEL_MAX_ATTEMPTS] + $lp, [], 'en'), 'label: pogingen op');
+check(!fm_translation_label_needed(['deleted_at' => 5] + $lp, [], 'en'), 'label: verwijderd');
+check_same([3, 1], fm_parse_poll_ids('3,1,x,-2,3,,0'), 'poll-ids gefilterd');
+check_same(50, count(fm_parse_poll_ids(implode(',', range(1, 80)))), 'poll-ids max 50');
+$pt = fm_create_thread('general', 'jan@kvt.nl', 'Poll', 'Goedemorgen **allemaal**');
+$pid = fm_first_post_id($pt);
+unset($GLOBALS['fmTranslateQueue']);
+$r = fm_translation_poll([$pid, 999999], 'en');
+check(!isset($r[999999]), 'poll: onbekende id weggelaten');
+check_same(true, $r[$pid]['label'] ?? null, 'poll: label tot vertaling er is');
+check(isset($GLOBALS['fmTranslateQueue'][$pid]), 'poll: nooit aangevraagd => in queue');
+check_same('pending', $r[$pid]['status'] ?? null, 'poll: status na claim');
+$GLOBALS['fmTranslateQueue'] = [];
+fm_store_translations($pid, fm_source_hash('Goedemorgen **allemaal**'), ['nl' => 'Goedemorgen **allemaal**', 'en' => 'Good morning **all**', 'fr' => 'a', 'de' => 'b'], 'nl');
+$r = fm_translation_poll([$pid], 'en');
+check(str_contains($r[$pid]['html'] ?? '', '<strong>all</strong>'), 'poll: gerenderde HTML');
+check_same(false, $r[$pid]['label'], 'poll: label weg');
+$r = fm_translation_poll([$pid], 'nl');
+check(!isset($r[$pid]['html']) && $r[$pid]['label'] === false, 'poll: NL-lezer origineel, geen label');
+// Max 2 per request
+$many = [];
+for ($i = 0; $i < 4; $i++) { $many[] = fm_first_post_id(fm_create_thread('general', 'jan@kvt.nl', 'T' . $i, 'Tekst ' . $i)); }
+unset($GLOBALS['fmTranslateQueue']);
+fm_translation_poll($many, 'en');
+check_same(FM_TRANSLATE_PER_REQUEST, count($GLOBALS['fmTranslateQueue'] ?? []), 'poll: max per request in queue');
+$GLOBALS['fmTranslateQueue'] = [];
+
+// Badge: admin ziet 'mislukt' met fout, gebruiker pending-label
+$fp = ['id' => 7, 'translation_status' => 'failed', 'translation_attempts' => 2, 'translation_failed_at' => time(), 'translation_error' => 'cURL: <timeout>'] + $lp;
+$adm = fm_translation_badge_html($fp, [], 'en', true);
+check(str_contains($adm, 'data-translation-error="cURL: &lt;timeout&gt;"') && str_contains($adm, fm_t('translation_failed')), 'badge: admin mislukt + ge-escapete fout');
+check(str_contains(fm_translation_badge_html($fp, [], 'en', false), 'data-translation-pending="7"'), 'badge: gebruiker pending zolang pogingen');
+check_same('', fm_translation_badge_html(['translation_attempts' => FM_TRANSLATE_LABEL_MAX_ATTEMPTS] + $fp, [], 'en', false), 'badge: gebruiker niets als pogingen op');
+check_same('', fm_translation_badge_html($fp, ['en' => 'x'], 'en', true), 'badge: niets met vertaling');
+
+// Timeouts afgeleid van syncTimeout
+check_same(300.0, fm_translate_sync_timeout(['syncTimeout' => 900]), 'syncTimeout max 300');
+check_same(120.0, fm_translate_sync_timeout(['syncTimeout' => 120]), 'syncTimeout instelbaar');
+check_same(150, fm_translate_time_limit(['syncTimeout' => 120]), 'time limit = sync + 30');
+check_same((int) fm_translate_sync_timeout(fm_translate_config()) + 60, fm_translate_stale_seconds(), 'stale = sync + 60');
+// Abort-guard: eigen claim -> failed, andere claim niet
+$gid = fm_first_post_id(fm_create_thread('general', 'jan@kvt.nl', 'Guard', 'Guard'));
+fm_claim_translation($gid, 'any', 1000);
+$GLOBALS['fmTranslateInflight'] = [$gid, 999];
+fm_translation_abort_guard();
+check_same('pending', fm_get_post($gid)['translation_status'], 'guard: andere claim blijft');
+$GLOBALS['fmTranslateInflight'] = [$gid, 1000];
+fm_translation_abort_guard();
+check_same('failed', fm_get_post($gid)['translation_status'], 'guard: eigen claim failed');
+check(str_contains((string) fm_get_post($gid)['translation_error'], 'afgebroken'), 'guard: fout opgeslagen');
+$GLOBALS['fmTranslateQueue'] = [];
+
+// i18n
+foreach (['nl', 'en', 'fr', 'de'] as $lg) {
+    foreach (['translation_pending', 'translation_failed', 'translation_error_title', 'translation_attempts_n', 'translation_last_try'] as $k) {
+        check(trim((string) (fm_strings()[$lg][$k] ?? '')) !== '', "i18n $k $lg");
+    }
+}
 
 $GLOBALS['copilotTranslate'] = null;
 
