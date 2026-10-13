@@ -61,78 +61,107 @@ $n = (int) fm_db()->query('SELECT COUNT(*) FROM post_translations WHERE post_id 
 check_same(0, $n, 'vertalingen weg na verwijderen');
 check(!fm_store_translations($postId, fm_source_hash(''), ['nl' => 'a', 'en' => 'b', 'fr' => 'c', 'de' => 'd'], null), 'geen vertaling voor verwijderd bericht');
 
-// Lazy queue bij weergave: nooit aangevraagde posts (lege status, geen vertalingen)
+// Lazy queue bij weergave: synchroon, max FM_TRANSLATE_PER_REQUEST, backoff op failed
 $GLOBALS['copilotTranslate'] = null;
 $tLazy = fm_create_thread('general', 'jan@kvt.nl', 'Lazy', 'Oude post zonder vertaling');
 $lazyId = fm_first_post_id($tLazy);
 $lazyPost = fm_get_post($lazyId);
 check_same('', $lazyPost['translation_status'], 'lazy: status leeg bij nieuw bericht zonder config-queue');
 unset($GLOBALS['fmTranslateQueue']);
-fm_queue_untranslated_posts([$lazyPost], []);
+fm_queue_translations_on_view([$lazyPost], []);
 check(!isset($GLOBALS['fmTranslateQueue'][$lazyId]), 'lazy: zonder config niet in wachtrij');
 check_same('', fm_get_post($lazyId)['translation_status'], 'lazy: zonder config status ongewijzigd');
 
 $GLOBALS['copilotTranslate'] = ['flowUrl' => 'https://example.invalid/flow', 'callbackSecret' => str_repeat('s', 20)];
 unset($GLOBALS['fmTranslateQueue']);
-fm_queue_untranslated_posts([fm_get_post($lazyId)], []);
+fm_queue_translations_on_view([fm_get_post($lazyId)], []);
 check(isset($GLOBALS['fmTranslateQueue'][$lazyId]), 'lazy: met config in wachtrij');
 $lazyAfter = fm_get_post($lazyId);
 check_same('pending', $lazyAfter['translation_status'], 'lazy: status pending als claim');
 check((int) $lazyAfter['translation_requested_at'] > 0, 'lazy: translation_requested_at gezet');
-// Tweede call mag niet opnieuw queueën (verse pending)
 $qBefore = $GLOBALS['fmTranslateQueue'];
-fm_queue_untranslated_posts([fm_get_post($lazyId)], []);
+fm_queue_translations_on_view([fm_get_post($lazyId)], []);
 check_same($qBefore, $GLOBALS['fmTranslateQueue'], 'lazy: verse pending niet opnieuw');
-$GLOBALS['fmTranslateQueue'] = []; // shutdown niet echt naar de flow laten gaan
+$GLOBALS['fmTranslateQueue'] = [];
 
-// Stale pending (>5 min) mag opnieuw geclaimd worden
+// Stale pending (>5 min) mag opnieuw
 fm_db()->prepare('UPDATE posts SET translation_status = ?, translation_requested_at = ? WHERE id = ?')
     ->execute(['pending', time() - FM_TRANSLATE_STALE_SECONDS - 10, $lazyId]);
 unset($GLOBALS['fmTranslateQueue']);
-fm_queue_untranslated_posts([fm_get_post($lazyId)], []);
+fm_queue_translations_on_view([fm_get_post($lazyId)], []);
 check(isset($GLOBALS['fmTranslateQueue'][$lazyId]), 'lazy: stale pending opnieuw in wachtrij');
 check((int) fm_get_post($lazyId)['translation_requested_at'] >= time() - 2, 'lazy: stale claim vernieuwt tijdstip');
 $GLOBALS['fmTranslateQueue'] = [];
 
-// Limiet 5 nieuwe + mislukte blijven via aparte retry (3)
+// Claimlimiet = wat synchroon verwerkt wordt (default 2)
 $ids = [];
-for ($i = 0; $i < 7; $i++) {
+for ($i = 0; $i < 5; $i++) {
     $tid = fm_create_thread('general', 'jan@kvt.nl', "L$i", "Body $i");
     $ids[] = fm_first_post_id($tid);
 }
 $batch = array_map('fm_get_post', $ids);
 unset($GLOBALS['fmTranslateQueue']);
-fm_queue_untranslated_posts($batch, [], 5);
-check_same(5, count($GLOBALS['fmTranslateQueue'] ?? []), 'lazy: max 5 per request');
+fm_queue_translations_on_view($batch, []);
+check_same(FM_TRANSLATE_PER_REQUEST, count($GLOBALS['fmTranslateQueue'] ?? []), 'lazy: max per request = PER_REQUEST');
 $pending = 0;
 foreach ($ids as $id) {
     if (fm_get_post($id)['translation_status'] === 'pending') {
         $pending++;
     }
 }
-check_same(5, $pending, 'lazy: precies 5 pending geclaimd');
+check_same(FM_TRANSLATE_PER_REQUEST, $pending, 'lazy: precies PER_REQUEST pending geclaimd');
 $GLOBALS['fmTranslateQueue'] = [];
 
 // Met bestaande vertalingen: niet queueën
 $tDone = fm_create_thread('general', 'jan@kvt.nl', 'Done', 'Hallo wereld');
 $doneId = fm_first_post_id($tDone);
 fm_store_translations($doneId, fm_source_hash('Hallo wereld'), ['nl' => 'Hallo wereld', 'en' => 'Hello world', 'fr' => 'f', 'de' => 'd'], 'nl');
-// store zet done; simuleer "nooit aangevraagd maar wél vertalingen" door status leeg te zetten
 fm_db()->prepare("UPDATE posts SET translation_status = '' WHERE id = ?")->execute([$doneId]);
 unset($GLOBALS['fmTranslateQueue']);
 $tr = fm_translations_for_posts([fm_get_post($doneId)]);
-fm_queue_untranslated_posts([fm_get_post($doneId)], $tr);
+fm_queue_translations_on_view([fm_get_post($doneId)], $tr);
 check(!isset($GLOBALS['fmTranslateQueue'][$doneId]), 'lazy: met vertalingen niet in wachtrij');
-check_same('', fm_get_post($doneId)['translation_status'], 'lazy: met vertalingen status niet geclaimd');
 
-// Retry: failed + stale pending
+// Backoff: ladder + failed_ready
+check_same(600, fm_translation_backoff_seconds(1), 'backoff: 10 min na 1e fail');
+check_same(3600, fm_translation_backoff_seconds(2), 'backoff: 1 u na 2e fail');
+check_same(21600, fm_translation_backoff_seconds(3), 'backoff: 6 u na 3e fail');
+check_same(86400, fm_translation_backoff_seconds(4), 'backoff: 1 dag na 4e+');
+check_same(86400, fm_translation_backoff_seconds(9), 'backoff: blijft dagelijks');
+
 $tFail = fm_create_thread('general', 'jan@kvt.nl', 'Fail', 'Mislukt bericht');
 $failId = fm_first_post_id($tFail);
-fm_db()->prepare("UPDATE posts SET translation_status = 'failed', translation_requested_at = 0 WHERE id = ?")->execute([$failId]);
+// Verse fail (attempts=1, failed_at=nu): nog niet opnieuw
+fm_db()->prepare("UPDATE posts SET translation_status = 'failed', translation_failed_at = ?, translation_attempts = 1, translation_requested_at = 0 WHERE id = ?")
+    ->execute([time(), $failId]);
 unset($GLOBALS['fmTranslateQueue']);
-fm_retry_failed_translations([fm_get_post($failId)], 3);
-check(isset($GLOBALS['fmTranslateQueue'][$failId]), 'retry: failed in wachtrij');
-check_same('pending', fm_get_post($failId)['translation_status'], 'retry: failed geclaimd als pending');
+fm_queue_translations_on_view([fm_get_post($failId)], []);
+check(!isset($GLOBALS['fmTranslateQueue'][$failId]), 'backoff: verse fail niet meteen opnieuw');
+
+// Na 10 min (attempts=1): wel opnieuw
+fm_db()->prepare('UPDATE posts SET translation_failed_at = ? WHERE id = ?')->execute([time() - 601, $failId]);
+unset($GLOBALS['fmTranslateQueue']);
+fm_queue_translations_on_view([fm_get_post($failId)], []);
+check(isset($GLOBALS['fmTranslateQueue'][$failId]), 'backoff: na 10 min wel opnieuw');
+check_same('pending', fm_get_post($failId)['translation_status'], 'backoff: geclaimd als pending');
+$GLOBALS['fmTranslateQueue'] = [];
+
+// mark_failed verhoogt attempts
+fm_db()->prepare("UPDATE posts SET translation_status = 'pending', translation_requested_at = ? WHERE id = ?")->execute([time(), $failId]);
+fm_mark_translation_failed($failId);
+$marked = fm_get_post($failId);
+check_same('failed', $marked['translation_status'], 'mark_failed: status failed');
+check_same(2, (int) $marked['translation_attempts'], 'mark_failed: attempts +1');
+check((int) $marked['translation_failed_at'] >= time() - 2, 'mark_failed: failed_at gezet');
+// attempts=2 → 1u backoff: 30 min te vroeg
+fm_db()->prepare('UPDATE posts SET translation_failed_at = ? WHERE id = ?')->execute([time() - 1800, $failId]);
+unset($GLOBALS['fmTranslateQueue']);
+fm_queue_translations_on_view([fm_get_post($failId)], []);
+check(!isset($GLOBALS['fmTranslateQueue'][$failId]), 'backoff: binnen 1u na 2e fail niet');
+fm_db()->prepare('UPDATE posts SET translation_failed_at = ? WHERE id = ?')->execute([time() - 3601, $failId]);
+unset($GLOBALS['fmTranslateQueue']);
+fm_queue_translations_on_view([fm_get_post($failId)], []);
+check(isset($GLOBALS['fmTranslateQueue'][$failId]), 'backoff: na 1u wel');
 $GLOBALS['fmTranslateQueue'] = [];
 
 $GLOBALS['copilotTranslate'] = null;

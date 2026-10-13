@@ -20,7 +20,7 @@ const FM_THREADS_PER_PAGE = 20;
 const FM_HOME_PER_PAGE = ['announcements' => 5, 'work' => 10, 'general' => 10];
 const FM_POSTS_PER_PAGE = 50;
 /** Schemaversie in PRAGMA user_version; verhogen bij elke schemawijziging. */
-const FM_SCHEMA_VERSION = 5;
+const FM_SCHEMA_VERSION = 6;
 
 function fm_data_dir(): string
 {
@@ -174,6 +174,16 @@ function fm_migrate(PDO $pdo): void
             $cols = array_column($pdo->query('PRAGMA table_info(posts)')->fetchAll(), 'name');
             if (!in_array('translation_requested_at', $cols, true)) {
                 $pdo->exec('ALTER TABLE posts ADD COLUMN translation_requested_at INTEGER NOT NULL DEFAULT 0');
+            }
+        }
+        if ($version < 6) {
+            // Backoff bij mislukte sync-vertalingen.
+            $cols = array_column($pdo->query('PRAGMA table_info(posts)')->fetchAll(), 'name');
+            if (!in_array('translation_failed_at', $cols, true)) {
+                $pdo->exec('ALTER TABLE posts ADD COLUMN translation_failed_at INTEGER NOT NULL DEFAULT 0');
+            }
+            if (!in_array('translation_attempts', $cols, true)) {
+                $pdo->exec('ALTER TABLE posts ADD COLUMN translation_attempts INTEGER NOT NULL DEFAULT 0');
             }
         }
         $pdo->exec('PRAGMA user_version = ' . FM_SCHEMA_VERSION);
@@ -378,7 +388,7 @@ function fm_edit_post(int $postId, string $email, string $body, ?string $title =
         if ($body !== (string) $post['body'] && function_exists('fm_queue_translation')) {
             // Oude vertalingen kloppen niet meer; source_hash laat late callbacks afketsen.
             $pdo->prepare('DELETE FROM post_translations WHERE post_id = ?')->execute([$postId]);
-            $pdo->prepare("UPDATE posts SET source_lang = '' WHERE id = ?")->execute([$postId]);
+            $pdo->prepare("UPDATE posts SET source_lang = '', translation_attempts = 0, translation_failed_at = 0 WHERE id = ?")->execute([$postId]);
             fm_queue_translation($postId);
         }
         fm_attach_files($pdo, $postId, $files, $now);
@@ -414,7 +424,7 @@ function fm_delete_post(int $postId, string $email): void
         fm_detach_files($pdo, $postId);
         $pdo->prepare('DELETE FROM mentions WHERE post_id = ?')->execute([$postId]);
         $pdo->prepare('DELETE FROM post_translations WHERE post_id = ?')->execute([$postId]);
-        $pdo->prepare("UPDATE posts SET translation_status = '', translation_requested_at = 0 WHERE id = ?")->execute([$postId]);
+        $pdo->prepare("UPDATE posts SET translation_status = '', translation_requested_at = 0, translation_failed_at = 0, translation_attempts = 0 WHERE id = ?")->execute([$postId]);
         fm_refresh_thread_meta((int) $post['thread_id']);
     });
 }

@@ -10,18 +10,27 @@ declare(strict_types=1);
  * - posts.translation_status: '', pending, done, failed (alleen intern, geen UI).
  * - posts.translation_requested_at: unix-tijd van de laatste pending-claim; pending ouder dan
  *   FM_TRANSLATE_STALE_SECONDS telt als stale en mag opnieuw geclaimd worden.
+ * - posts.translation_failed_at / translation_attempts: backoff na timeout/cURL-fout
+ *   (10 min → 1 u → 6 u → daarna max. 1×/dag).
  * - post_translations: per bericht en taal de vertaalde ruwe opmaaktekst + source_hash
  *   (sha256 van de body waarvoor vertaald is). Bewerkt bericht => andere hash => oude callback genegeerd.
  *
- * Bij threadweergave: mislukte opnieuw (max 3) en nooit aangevraagde/stale alsnog (max 5),
- * niet-blokkerend na fastcgi_finish_request. Batch: kort/async per post zodat alle claims
- * echt verstuurd worden. Zonder geldige $copilotTranslate: niets.
+ * De Power Automate-flow is synchroon (Response kan tientallen seconden duren). De shutdown-
+ * worker wacht daarom altijd de volle syncTimeout per post en claimt bij weergave max.
+ * FM_TRANSLATE_PER_REQUEST posts. Zonder geldige $copilotTranslate: niets.
  */
 
 require_once __DIR__ . '/CoPilotTranslate.php';
 
 /** Pending ouder dan dit (seconden) mag opnieuw geclaimd worden. */
 const FM_TRANSLATE_STALE_SECONDS = 300;
+
+/** Max. posts per request synchroon verwerken (≈ N × syncTimeout binnen set_time_limit). */
+const FM_TRANSLATE_PER_REQUEST = 2;
+
+/** Backoff na mislukte poging n (1-based): 10 min, 1 u, 6 u; daarna 1 dag. */
+const FM_TRANSLATE_BACKOFF = [600, 3600, 21600];
+const FM_TRANSLATE_BACKOFF_DAILY = 86400;
 
 function fm_translate_config(): ?array
 {
@@ -35,6 +44,20 @@ function fm_source_hash(string $body): string
     return hash('sha256', $body);
 }
 
+/** Wachttijd (seconden) na $attempts mislukte pogingen voordat opnieuw mag. */
+function fm_translation_backoff_seconds(int $attempts): int
+{
+    if ($attempts <= 0) {
+        return 0;
+    }
+    $ladder = FM_TRANSLATE_BACKOFF;
+    if ($attempts <= count($ladder)) {
+        return $ladder[$attempts - 1];
+    }
+
+    return FM_TRANSLATE_BACKOFF_DAILY;
+}
+
 /** Pending zonder recente claim (of zonder tijdstip) → stale. */
 function fm_translation_pending_stale(array $post): bool
 {
@@ -46,10 +69,22 @@ function fm_translation_pending_stale(array $post): bool
     return $at <= 0 || $at < time() - FM_TRANSLATE_STALE_SECONDS;
 }
 
+/** Failed waarvan de backoff verstreken is (of nooit een failed_at had). */
+function fm_translation_failed_ready(array $post): bool
+{
+    if (($post['translation_status'] ?? '') !== 'failed') {
+        return false;
+    }
+    $failedAt = (int) ($post['translation_failed_at'] ?? 0);
+    $attempts = max(1, (int) ($post['translation_attempts'] ?? 0));
+
+    return $failedAt <= 0 || time() >= $failedAt + fm_translation_backoff_seconds($attempts);
+}
+
 /**
  * Zet status op pending + tijdstip. $mode:
  * - 'new': lege status of stale pending
- * - 'failed': failed of stale pending
+ * - 'failed': failed (backoff al gecheckt door caller) of stale pending
  * - 'any': altijd (zoals bij directe queue na write)
  */
 function fm_claim_translation(int $postId, string $mode = 'any'): bool
@@ -77,6 +112,14 @@ function fm_claim_translation(int $postId, string $mode = 'any'): bool
     return $st->rowCount() > 0;
 }
 
+function fm_mark_translation_failed(int $postId): void
+{
+    $now = time();
+    fm_db()->prepare("UPDATE posts SET translation_status = 'failed', translation_failed_at = ?,
+        translation_attempts = translation_attempts + 1
+        WHERE id = ? AND translation_status = 'pending'")->execute([$now, $postId]);
+}
+
 /** Bericht na COMMIT laten vertalen; de request loopt (na fastcgi_finish_request) door in een shutdown-functie. */
 function fm_queue_translation(int $postId): void
 {
@@ -99,7 +142,7 @@ function fm_run_translation_queue(): void
     }
     $finished = false;
     if (function_exists('fastcgi_finish_request')) {
-        // Antwoord (redirect) gaat nu al naar de browser; daarna mogen we de flow aanroepen.
+        // Antwoord (redirect) gaat nu al naar de browser; daarna mogen we op de flow wachten.
         if (session_status() === PHP_SESSION_ACTIVE) {
             session_write_close();
         }
@@ -107,26 +150,16 @@ function fm_run_translation_queue(): void
         $finished = @fastcgi_finish_request();
     }
     if ($finished) {
-        @set_time_limit(120);
+        // Tot ~FM_TRANSLATE_PER_REQUEST × syncTimeout (90 s) + marge.
+        @set_time_limit(200);
     }
-    $config = fm_translate_config();
-    // Eén post na write: synchroon wachten mag. Batch (lazy/retry): kort/async zodat élke claim
-    // een request krijgt i.p.v. één sync-wait van ~90 s die de rest laat hangen op pending.
-    $asyncTimeout = (float) (($config['timeout'] ?? 2));
-    $n = count($ids);
     foreach ($ids as $id) {
         try {
-            if ($finished) {
-                $timeout = $n === 1 ? null : $asyncTimeout;
-            } else {
-                $timeout = 1.5;
-            }
-            fm_translate_post((int) $id, $timeout);
+            // Altijd volle sync-wachttijd na finish; zonder finish kort (CLI/tests/geen FPM).
+            fm_translate_post((int) $id, $finished ? null : 1.5);
         } catch (Throwable) {
-            // Vertalen mag nooit een fout opleveren voor de gebruiker.
             try {
-                fm_db()->prepare("UPDATE posts SET translation_status = 'failed' WHERE id = ? AND translation_status = 'pending'")
-                    ->execute([(int) $id]);
+                fm_mark_translation_failed((int) $id);
             } catch (Throwable) {
             }
         }
@@ -168,9 +201,9 @@ function fm_translate_post(int $postId, ?float $timeout = null): void
     if ($result !== null) {
         fm_store_translations($postId, $hash, $result['translations'], $result['source']);
     } elseif ($status < 200 || $status >= 300) {
-        // Timeout of fout: 'failed', een latere weergave probeert het opnieuw (fm_retry_failed_translations).
-        // 2xx zonder bruikbare body = asynchroon geaccepteerd; blijft 'pending' tot de callback (of stale).
-        fm_db()->prepare("UPDATE posts SET translation_status = 'failed' WHERE id = ? AND translation_status = 'pending'")->execute([$postId]);
+        // Timeout of cURL/HTTP-fout: failed + attempts; backoff bepaalt de volgende poging.
+        // 2xx zonder bruikbare body = asynchroon geaccepteerd; blijft pending tot callback of stale.
+        fm_mark_translation_failed($postId);
     }
 }
 
@@ -193,7 +226,8 @@ function fm_store_translations(int $postId, string $hash, array $translations, ?
                 $st->execute([$postId, (string) $lang, fm_clean_text($text, 40000), $hash, $now]);
             }
         }
-        $pdo->prepare("UPDATE posts SET translation_status = 'done', source_lang = CASE WHEN ? <> '' THEN ? ELSE source_lang END WHERE id = ?")
+        $pdo->prepare("UPDATE posts SET translation_status = 'done', translation_attempts = 0, translation_failed_at = 0,
+            source_lang = CASE WHEN ? <> '' THEN ? ELSE source_lang END WHERE id = ?")
             ->execute([(string) $source, (string) $source, $postId]);
 
         return true;
@@ -224,41 +258,13 @@ function fm_translations_for_posts(array $posts): array
     return $out;
 }
 
-/** Mislukte (en stale pending) vertalingen opnieuw in de wachtrij (max. $limit per request). */
-function fm_retry_failed_translations(array $posts, int $limit = 3): void
-{
-    if (fm_translate_config() === null) {
-        return;
-    }
-    foreach ($posts as $p) {
-        if ($limit <= 0) {
-            return;
-        }
-        if (!empty($p['deleted_at']) || trim((string) ($p['body'] ?? '')) === '') {
-            continue;
-        }
-        $status = (string) ($p['translation_status'] ?? '');
-        $stale = fm_translation_pending_stale($p);
-        if ($status !== 'failed' && !$stale) {
-            continue;
-        }
-        $id = (int) $p['id'];
-        if (!fm_claim_translation($id, 'failed')) {
-            continue;
-        }
-        fm_queue_translation($id);
-        $limit--;
-    }
-}
-
 /**
- * Nooit aangevraagde of stale-pending vertalingen (geen actuele vertalingen) alsnog
- * in de wachtrij zetten bij weergave — o.a. berichten van vóór deze feature (max. $limit per request).
- * Claim (pending + tijdstip) voorkomt dubbele aanvragen. Zonder config: niets.
+ * Bij threadweergave: nooit aangevraagde, stale pending, of failed-na-backoff alsnog claimen
+ * en in de shutdown-queue zetten — max. $limit (= wat we synchroon kunnen verwerken).
  *
  * @param array<int, array<string,string>> $translationsByPost
  */
-function fm_queue_untranslated_posts(array $posts, array $translationsByPost, int $limit = 5): void
+function fm_queue_translations_on_view(array $posts, array $translationsByPost, int $limit = FM_TRANSLATE_PER_REQUEST): void
 {
     if (fm_translate_config() === null || $limit <= 0) {
         return;
@@ -273,13 +279,16 @@ function fm_queue_untranslated_posts(array $posts, array $translationsByPost, in
         }
         $status = (string) ($p['translation_status'] ?? '');
         $stale = fm_translation_pending_stale($p);
-        if ($status !== '' && !$stale) {
-            continue;
+        $mode = null;
+        if ($status === '' || $stale) {
+            if (($translationsByPost[$id] ?? []) !== []) {
+                continue;
+            }
+            $mode = 'new';
+        } elseif ($status === 'failed' && fm_translation_failed_ready($p)) {
+            $mode = 'failed';
         }
-        if (($translationsByPost[$id] ?? []) !== []) {
-            continue;
-        }
-        if (!fm_claim_translation($id, 'new')) {
+        if ($mode === null || !fm_claim_translation($id, $mode)) {
             continue;
         }
         fm_queue_translation($id);
