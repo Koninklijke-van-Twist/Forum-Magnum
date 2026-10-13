@@ -148,7 +148,9 @@ foreach ($posts as $post) {
     }
     // Voetregel over de volle breedte: links de permalink (#id, ook als post#id te citeren), rechts datum en bewerkt.
     echo '<footer class="post-foot">'
-        . '<a class="post-link" href="' . h(fm_thread_url($threadId, $page, $postId)) . '" title="' . h(fm_t('link_post') . ' (post#' . $postId . ')') . '">#' . $postId . '</a>'
+        . '<a class="post-link" href="' . h(fm_thread_url($threadId, $page, $postId)) . '" title="' . h(fm_t('link_post') . ' (post#' . $postId . ')'
+            . ($fmIsAdmin && fm_translate_config() !== null ? "\nvertaling: " . ((string) ($post['translation_status'] ?? '') ?: '-') . ', bron ' . ((string) ($post['source_lang'] ?? '') ?: '?')
+                . ', pogingen ' . (int) ($post['translation_attempts'] ?? 0) . (((string) ($post['translation_error'] ?? '')) !== '' ? "\nfout: " . $post['translation_error'] : '') : '')) . '">#' . $postId . '</a>'
         . '<span class="post-when"><time datetime="' . h(gmdate('c', (int) $post['created_at'])) . '">' . h(fm_format_time((int) $post['created_at'])) . '</time>'
         . (!empty($post['edited_at']) && !$deleted ? ' <span class="edited">(' . h(fm_t('edited', fm_format_time((int) $post['edited_at']))) . ')</span>' : '')
         . '</span></footer>';
