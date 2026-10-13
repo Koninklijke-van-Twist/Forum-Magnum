@@ -651,7 +651,7 @@ function fm_set_lang(string $email, string $lang): void
 /** Berichten van een thread met versie > $since, oplopend op versie; indexquery op (thread_id, updated_at). */
 function fm_posts_updated_since(int $threadId, int $since, int $limit = 100): array
 {
-    $st = fm_db()->prepare('SELECT * FROM posts WHERE thread_id = ? AND updated_at > ? ORDER BY updated_at ASC LIMIT ?');
+    $st = fm_db()->prepare('SELECT * FROM posts WHERE thread_id = ? AND updated_at > ? ORDER BY updated_at ASC, id ASC LIMIT ?'); // versies zijn uniek; id alleen als stabiele tiebreak
     $st->bindValue(1, $threadId, PDO::PARAM_INT);
     $st->bindValue(2, $since, PDO::PARAM_INT);
     $st->bindValue(3, $limit, PDO::PARAM_INT);

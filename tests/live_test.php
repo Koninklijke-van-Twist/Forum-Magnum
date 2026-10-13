@@ -81,9 +81,11 @@ $v = fm_thread_version($t2);
 for ($i = 0; $i < 105; $i++) { fm_reply($t2, 'jan@kvt.nl', 'b' . $i); }
 $u1 = fm_thread_updates($th2, $v, 1, 0, 'piet@kvt.nl', false);
 check_same(100, count($u1['posts']), 'batch van 100');
+check_same(true, $u1['has_more'], 'has_more bij volle batch');
 $u2 = fm_thread_updates($th2, $u1['since'], 1, 0, 'piet@kvt.nl', false);
 check_same(5, count($u2['posts']), 'rest bij de volgende poll');
 check_same(fm_thread_version($t2), $u2['since'], 'cursor daarna op de threadversie');
+check_same(false, $u2['has_more'], 'has_more uit na laatste batch');
 
 // i18n
 foreach (['nl', 'en', 'fr', 'de'] as $lg) {

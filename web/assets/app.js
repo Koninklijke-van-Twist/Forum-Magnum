@@ -426,7 +426,7 @@ document.addEventListener('click', function (e) {
     var list = document.querySelector('.posts[data-thread]');
     if (!list || !window.fetch) { return; }
     var since = list.getAttribute('data-since') || '0', page = Number(list.getAttribute('data-page')) || 1;
-    var timer = null, busy = false, errors = 0, lastActive = Date.now();
+    var timer = null, busy = false, errors = 0, more = false, lastActive = Date.now();
     ['mousemove', 'keydown', 'scroll', 'touchstart', 'click'].forEach(function (t) {
         document.addEventListener(t, function () { lastActive = Date.now(); }, { passive: true });
     });
@@ -456,7 +456,7 @@ document.addEventListener('click', function (e) {
         Object.keys(posts).sort(function (a, b) { return a - b; }).forEach(function (id) {
             var row = posts[id], art = document.getElementById('p' + id);
             if (art) {
-                if (Number(art.getAttribute('data-updated') || 0) >= row.updated_at) { return; }
+                if (Number(art.getAttribute('data-updated') || 0) >= row.updated_at) { return; } // updated_at = unieke revisie
                 if (art.querySelector('form.composer')) { notice('editing-' + id, list.getAttribute('data-changed-editing')); return; }
                 var wasOpen = art.querySelector('[data-original]:not([hidden])') !== null && art.querySelector('[data-translated]') !== null;
                 var el = toElement(row.html);
@@ -492,9 +492,9 @@ document.addEventListener('click', function (e) {
         var guard = ctrl ? setTimeout(function () { ctrl.abort(); }, 25000) : null;
         fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' }, signal: ctrl ? ctrl.signal : undefined })
             .then(function (r) { if (!r.ok) { throw new Error('HTTP ' + r.status); } return r.json(); })
-            .then(function (data) { errors = 0; apply(data); if (data.since) { since = String(data.since); } })
-            .catch(function () { errors = Math.min(errors + 1, 4); })
-            .then(function () { clearTimeout(guard); busy = false; schedule(); });
+            .then(function (data) { errors = 0; apply(data); if (data.since) { since = String(data.since); } more = !!data.has_more; })
+            .catch(function () { errors = Math.min(errors + 1, 4); more = false; })
+            .then(function () { clearTimeout(guard); busy = false; schedule(more ? 0 : undefined); });
     }
     document.addEventListener('visibilitychange', function () {
         if (document.hidden) { clearTimeout(timer); timer = null; } else if (!busy) { lastActive = Date.now(); schedule(0); }

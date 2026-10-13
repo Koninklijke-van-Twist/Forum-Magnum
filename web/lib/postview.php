@@ -108,7 +108,7 @@ function fm_thread_updates(array $thread, int $since, int $page, int $editId, st
     $threadId = (int) $thread['id'];
     $version = fm_thread_version($threadId);
     $pages = fm_page_count(fm_count_posts($threadId), FM_POSTS_PER_PAGE);
-    $out = ['since' => max($since, $version), 'pages' => $pages, 'last_url' => fm_thread_url($threadId, $pages), 'posts' => []];
+    $out = ['since' => max($since, $version), 'has_more' => false, 'pages' => $pages, 'last_url' => fm_thread_url($threadId, $pages), 'posts' => []];
     $limit = 100;
     $rows = $since > 0 ? fm_posts_updated_since($threadId, $since, $limit) : [];
     if ($rows === []) {
@@ -117,6 +117,7 @@ function fm_thread_updates(array $thread, int $since, int $page, int $editId, st
     if (count($rows) >= $limit) {
         // Meer dan één batch: cursor alleen tot de laatst geleverde versie, de rest komt bij de volgende poll.
         $out['since'] = (int) end($rows)['updated_at'];
+        $out['has_more'] = $out['since'] < $version;
     }
     $ctx = ['thread' => $thread, 'page' => $page, 'firstPostId' => fm_first_post_id($threadId), 'editId' => $editId, 'editDraft' => null,
         'attachments' => fm_attachments_for_posts(array_column($rows, 'id')), 'translations' => fm_translations_for_posts($rows),
