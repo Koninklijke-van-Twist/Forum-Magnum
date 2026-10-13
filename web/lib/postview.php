@@ -106,11 +106,20 @@ function fm_render_post_html(array $post, array $c): string
 function fm_thread_updates(array $thread, int $since, int $page, int $editId, string $user, bool $isAdmin): array
 {
     $threadId = (int) $thread['id'];
-    $version = fm_thread_version($threadId);
-    $pages = fm_page_count(fm_count_posts($threadId), FM_POSTS_PER_PAGE);
-    $out = ['since' => max($since, $version), 'has_more' => false, 'pages' => $pages, 'last_url' => fm_thread_url($threadId, $pages), 'posts' => []];
     $limit = 100;
-    $rows = $since > 0 ? fm_posts_updated_since($threadId, $since, $limit) : [];
+    // Versie eerst, samen met de rijen die deze poll teruggeeft. since blijft zo
+    // binnen de snapshot: een commit ná de query kan de cursor niet al voorbijlopen.
+    $snap = fm_read_snapshot(static function () use ($threadId, $since, $limit): array {
+        $version = fm_thread_version($threadId);
+        $pages = fm_page_count(fm_count_posts($threadId), FM_POSTS_PER_PAGE);
+        $rows = $since > 0 ? fm_posts_updated_since($threadId, $since, $limit) : [];
+
+        return ['version' => $version, 'pages' => $pages, 'rows' => $rows];
+    });
+    $version = $snap['version'];
+    $pages = $snap['pages'];
+    $rows = $snap['rows'];
+    $out = ['since' => max($since, $version), 'has_more' => false, 'pages' => $pages, 'last_url' => fm_thread_url($threadId, $pages), 'posts' => []];
     if ($rows === []) {
         return $out;
     }

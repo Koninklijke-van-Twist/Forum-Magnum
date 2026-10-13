@@ -250,6 +250,37 @@ function fm_transaction(callable $fn): mixed
 }
 
 /**
+ * Lees-snapshot (BEGIN, uitgesteld): elke query in $fn ziet dezelfde commit.
+ * Een live-cursor die ná de postlijst wordt gelezen kan een tussentijdse commit
+ * al omvatten terwijl die rij niet gerenderd is; polls met updated_at > since missen hem dan.
+ * In één snapshot staat de cursor nooit verder dan wat de pagina laat zien.
+ * Alleen leesqueries in $fn; niet aanroepen vanuit fm_transaction.
+ */
+function fm_read_snapshot(callable $fn): mixed
+{
+    if (!empty($GLOBALS['fmReadSnapshot'])) {
+        return $fn();
+    }
+    $pdo = fm_db();
+    $pdo->exec('BEGIN');
+    $GLOBALS['fmReadSnapshot'] = true;
+    try {
+        $result = $fn();
+        $pdo->exec('COMMIT');
+
+        return $result;
+    } catch (Throwable $e) {
+        try {
+            $pdo->exec('ROLLBACK');
+        } catch (Throwable) {
+        }
+        throw $e;
+    } finally {
+        $GLOBALS['fmReadSnapshot'] = false;
+    }
+}
+
+/**
  * Bestanden pas na COMMIT/ROLLBACK opruimen, in een eigen BEGIN IMMEDIATE:
  * zo raakt een teruggedraaide transactie geen bestanden kwijt en blijven
  * bestanden van een mislukte upload niet als wees achter.
@@ -575,6 +606,39 @@ function fm_list_posts(int $threadId, int $page, int $perPage = FM_POSTS_PER_PAG
     return $st->fetchAll();
 }
 
+/**
+ * Paginering, berichten en live-cursor in één lees-snapshot.
+ * De versie wordt vóór de postlijst gelezen: data-since mag niet nieuwer zijn dan de gerenderde rijen.
+ * $requestedPage null = de pagina die fm_resolve_open_page kiest (zonder ?p=).
+ *
+ * @return array{version:int, pages:int, page:int, anchor:int, posts:array<int, array>}
+ */
+function fm_thread_page(int $threadId, string $email, ?int $requestedPage): array
+{
+    return fm_read_snapshot(static function () use ($threadId, $email, $requestedPage): array {
+        $version = fm_thread_version($threadId);
+        $pages = fm_page_count(fm_count_posts($threadId), FM_POSTS_PER_PAGE);
+        $anchor = 0;
+        if ($requestedPage !== null) {
+            $page = max(1, min($pages, $requestedPage));
+            $firstUnread = fm_first_unread_post_id($threadId, $email);
+            if ($firstUnread > 0 && fm_page_of_post($threadId, $firstUnread) === $page) {
+                $anchor = $firstUnread;
+            }
+        } else {
+            [$page, $anchor] = fm_resolve_open_page($threadId, $email);
+        }
+
+        return [
+            'version' => $version,
+            'pages' => $pages,
+            'page' => $page,
+            'anchor' => $anchor,
+            'posts' => fm_list_posts($threadId, $page),
+        ];
+    });
+}
+
 function fm_page_count(int $total, int $perPage): int
 {
     return max(1, (int) ceil($total / max(1, $perPage)));
@@ -648,7 +712,11 @@ function fm_set_lang(string $email, string $lang): void
         ->execute([strtolower($email), $lang]);
 }
 
-/** Berichten van een thread met versie > $since, oplopend op versie; indexquery op (thread_id, updated_at). */
+/**
+ * Berichten van een thread met versie > $since, oplopend op versie; indexquery op (thread_id, updated_at).
+ * $since moet de versie van een eerdere lees-snapshot zijn (fm_thread_page / fm_thread_updates), niet een
+ * versie die ná het renderen is gelezen: anders valt een commit in dat gat buiten elke poll.
+ */
 function fm_posts_updated_since(int $threadId, int $since, int $limit = 100): array
 {
     $st = fm_db()->prepare('SELECT * FROM posts WHERE thread_id = ? AND updated_at > ? ORDER BY updated_at ASC, id ASC LIMIT ?'); // versies zijn uniek; id alleen als stabiele tiebreak
