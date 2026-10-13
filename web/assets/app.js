@@ -294,7 +294,9 @@ document.addEventListener('click', function (e) {
         var post = document.getElementById('p' + id);
         var inserted = false;
         if (info.html && post) {
-            var body = post.querySelector('[data-body]');
+            var existing = post.querySelector('[data-translated]');
+            if (existing) { existing.innerHTML = info.html; inserted = true; } // vernieuwde vertaling (opnieuw aangevraagd)
+            var body = existing ? null : post.querySelector('[data-body]');
             if (body) {
                 inserted = true;
                 var tr = document.createElement('div');

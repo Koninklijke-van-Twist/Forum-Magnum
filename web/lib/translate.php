@@ -118,7 +118,7 @@ function fm_claim_translation(int $postId, string $mode = 'any', ?int $now = nul
     $staleBefore = $now - fm_translate_stale_seconds();
     if ($mode === 'new') {
         $st = fm_db()->prepare("UPDATE posts SET translation_status = 'pending', translation_requested_at = ?
-            WHERE id = ? AND (translation_status = ''
+            WHERE id = ? AND (translation_status IN ('', 'retry')
                 OR (translation_status = 'pending' AND (translation_requested_at = 0 OR translation_requested_at < ?)))");
         $st->execute([$now, $postId, $staleBefore]);
     } elseif ($mode === 'failed') {
@@ -341,10 +341,27 @@ function fm_store_translations(int $postId, string $hash, array $translations, ?
         $now = time();
         $st = $pdo->prepare('INSERT INTO post_translations (post_id, lang, text, source_hash, updated_at) VALUES (?,?,?,?,?)
             ON CONFLICT(post_id, lang) DO UPDATE SET text = excluded.text, source_hash = excluded.source_hash, updated_at = excluded.updated_at');
+        $echoed = [];
+        $knownSource = (string) ($source ?? '') !== '' ? (string) $source : (string) ($post['source_lang'] ?? '');
         foreach ($translations as $lang => $text) {
-            if (array_key_exists((string) $lang, FM_LANGUAGES) && is_string($text)) {
-                $st->execute([$postId, (string) $lang, fm_clean_text($text, 40000), $hash, $now]);
+            if (!array_key_exists((string) $lang, FM_LANGUAGES) || !is_string($text)) {
+                continue;
             }
+            if (fm_translation_is_echo((string) $post['body'], $text, (string) $lang, $knownSource)) {
+                // Flow gaf voor deze taal de brontekst terug: niet opslaan, later opnieuw.
+                $echoed[] = (string) $lang;
+                continue;
+            }
+            $st->execute([$postId, (string) $lang, fm_clean_text($text, 40000), $hash, $now]);
+        }
+        if ($echoed !== []) {
+            $msg = 'flow gaf origineel terug voor: ' . implode(', ', $echoed) . ' (bron ' . ($knownSource ?: '?') . ')';
+            error_log('[forum-magnum] vertaling post ' . $postId . ': ' . $msg);
+            $pdo->prepare("UPDATE posts SET translation_status = 'failed', translation_failed_at = ?, translation_attempts = translation_attempts + 1,
+                translation_error = ?, source_lang = CASE WHEN ? <> '' THEN ? ELSE source_lang END WHERE id = ?")
+                ->execute([$now, $msg, (string) $source, (string) $source, $postId]);
+
+            return true;
         }
         $pdo->prepare("UPDATE posts SET translation_status = 'done', translation_attempts = 0, translation_failed_at = 0, translation_error = '',
             source_lang = CASE WHEN ? <> '' THEN ? ELSE source_lang END WHERE id = ?")
@@ -358,9 +375,11 @@ function fm_store_translations(int $postId, string $hash, array $translations, ?
 function fm_translations_for_posts(array $posts): array
 {
     $hashes = [];
+    $byId = [];
     foreach ($posts as $p) {
         if (empty($p['deleted_at'])) {
             $hashes[(int) $p['id']] = fm_source_hash((string) $p['body']);
+            $byId[(int) $p['id']] = $p;
         }
     }
     if ($hashes === []) {
@@ -370,7 +389,9 @@ function fm_translations_for_posts(array $posts): array
     $st->execute(array_keys($hashes));
     $out = [];
     foreach ($st->fetchAll() as $row) {
-        if (($hashes[(int) $row['post_id']] ?? '') === $row['source_hash']) {
+        $p = $byId[(int) $row['post_id']] ?? null;
+        if (($hashes[(int) $row['post_id']] ?? '') === $row['source_hash']
+            && !($p !== null && fm_translation_is_echo((string) $p['body'], (string) $row['text'], (string) $row['lang'], (string) ($p['source_lang'] ?? '')))) {
             $out[(int) $row['post_id']][(string) $row['lang']] = (string) $row['text'];
         }
     }
@@ -400,8 +421,10 @@ function fm_queue_translations_on_view(array $posts, array $translationsByPost, 
         $status = (string) ($p['translation_status'] ?? '');
         $stale = fm_translation_pending_stale($p);
         $mode = null;
-        if ($status === '' || $stale) {
-            if (($translationsByPost[$id] ?? []) !== []) {
+        if ($status === 'retry') {
+            $mode = 'new'; // beheerder vroeg opnieuw aan: ook met bestaande vertalingen
+        } elseif ($status === '' || $stale) {
+            if ($status === '' && ($translationsByPost[$id] ?? []) !== []) {
                 continue;
             }
             $mode = 'new';
@@ -449,10 +472,14 @@ function fm_translation_label_needed(array $post, array $translations, string $l
     if (fm_translate_config() === null || !empty($post['deleted_at']) || trim((string) ($post['body'] ?? '')) === '') {
         return false;
     }
-    if ((string) ($post['source_lang'] ?? '') === $lang || isset($translations[$lang])) {
+    $status = (string) ($post['translation_status'] ?? '');
+    if ((string) ($post['source_lang'] ?? '') === $lang) {
         return false;
     }
-    $status = (string) ($post['translation_status'] ?? '');
+    if (isset($translations[$lang])) {
+        // Bestaande vertaling: alleen een label tijdens een opnieuw-aanvraag (retry, of de pending-claim daarvan).
+        return $status === 'retry' || $status === 'pending';
+    }
     if ($status === 'done') {
         return false;
     }
@@ -503,7 +530,7 @@ function fm_translation_poll(array $ids, string $lang, bool $isAdmin = false): a
         $status = (string) ($fresh['translation_status'] ?? '');
         $row = ['status' => $status === '' ? 'none' : $status, 'label' => fm_translation_label_needed($fresh, $translations[$id] ?? [], $lang),
             'badge' => fm_translation_badge_html($fresh, $translations[$id] ?? [], $lang, $isAdmin)];
-        $text = fm_pick_translation($fresh, $translations[$id] ?? [], $lang);
+        $text = $row['label'] ? null : fm_pick_translation($fresh, $translations[$id] ?? [], $lang);
         if ($text !== null) {
             $row['html'] = renderTicketMessageMarkdown($text, 0, $attachments[$id] ?? []);
             $row['lang'] = FM_LANGUAGES[$lang][1] ?? $lang;
@@ -553,4 +580,40 @@ function fm_translation_abort_guard(): void
         }
     } catch (Throwable) {
     }
+}
+
+/** Vertaling die (genormaliseerd) gelijk is aan het origineel terwijl de bron bekend én anders is. */
+function fm_translation_is_echo(string $body, string $text, string $lang, string $source): bool
+{
+    if ($source === '' || $source === $lang) {
+        return false;
+    }
+    $norm = static fn (string $t): string => mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $t)));
+
+    return $norm($text) !== '' && $norm($text) === $norm($body);
+}
+
+/** Beheerder: opnieuw laten vertalen (bestaande vertalingen blijven tot de nieuwe binnen is). */
+function fm_can_request_retranslation(array $post): bool
+{
+    if (fm_translate_config() === null || !empty($post['deleted_at']) || trim((string) ($post['body'] ?? '')) === '') {
+        return false;
+    }
+    $status = (string) ($post['translation_status'] ?? '');
+
+    return $status !== 'retry' && !($status === 'pending' && !fm_translation_pending_stale($post));
+}
+
+function fm_request_retranslation(int $postId): bool
+{
+    $post = fm_get_post($postId);
+    if ($post === null || !fm_can_request_retranslation($post)) {
+        return false;
+    }
+    $st = fm_db()->prepare("UPDATE posts SET translation_status = 'retry', translation_requested_at = 0, translation_attempts = 0,
+        translation_failed_at = 0, translation_error = '' WHERE id = ? AND translation_status <> 'retry'
+        AND NOT (translation_status = 'pending' AND translation_requested_at >= ?)");
+    $st->execute([$postId, time() - fm_translate_stale_seconds()]);
+
+    return $st->rowCount() > 0;
 }

@@ -200,7 +200,8 @@ check_same('done', fm_get_post($noClockId)['translation_status'], 'mark_failed: 
 $lp = ['id' => 1, 'body' => 'Hallo', 'deleted_at' => null, 'source_lang' => '', 'translation_status' => 'pending', 'translation_attempts' => 0];
 check(fm_translation_label_needed($lp, [], 'en'), 'label: onbekende bron, geen vertaling');
 check(!fm_translation_label_needed(['source_lang' => 'en'] + $lp, [], 'en'), 'label: bron = lezerstaal');
-check(!fm_translation_label_needed($lp, ['en' => 'Hello'], 'en'), 'label: vertaling er al');
+check(!fm_translation_label_needed(['translation_status' => 'done'] + $lp, ['en' => 'Hello'], 'en'), 'label: vertaling er al');
+check(fm_translation_label_needed(['translation_status' => 'retry'] + $lp, ['en' => 'Hello'], 'en'), 'label: tijdens opnieuw aanvragen');
 check(!fm_translation_label_needed(['translation_status' => 'done'] + $lp, [], 'en'), 'label: done');
 check(fm_translation_label_needed(['translation_status' => 'failed', 'translation_attempts' => 1] + $lp, [], 'en'), 'label: failed met pogingen over');
 check(!fm_translation_label_needed(['translation_status' => 'failed', 'translation_attempts' => FM_TRANSLATE_LABEL_MAX_ATTEMPTS] + $lp, [], 'en'), 'label: pogingen op');
@@ -261,6 +262,35 @@ fm_store_translations($pid, fm_source_hash('Goedemorgen **allemaal**'), ['nl' =>
 check_same('', fm_get_post($pid)['translation_error'], 'store: fout gewist');
 fm_edit_post($pid, 'jan@kvt.nl', 'Anders');
 check_same('', fm_get_post($pid)['translation_status'], 'edit: status terug naar nooit aangevraagd');
+
+// Echo: flow geeft voor fr de brontekst terug
+$eid = fm_first_post_id(fm_create_thread('general', 'jan@kvt.nl', 'Echo', 'Goedemorgen allemaal'));
+fm_store_translations($eid, fm_source_hash('Goedemorgen allemaal'), ['nl' => 'Goedemorgen allemaal', 'en' => 'Good morning all', 'fr' => " goedemorgen  allemaal\n", 'de' => 'Guten Morgen'], 'nl');
+$ep = fm_get_post($eid);
+$etr = fm_translations_for_posts([$ep]);
+check(!isset($etr[$eid]['fr']) && isset($etr[$eid]['en']), 'echo: fr niet opgeslagen, en wel');
+check_same('failed', $ep['translation_status'], 'echo: failed voor retry');
+check(str_contains((string) $ep['translation_error'], 'fr'), 'echo: fout noemt fr');
+check(fm_translation_label_needed($ep, $etr[$eid] ?? [], 'fr'), 'echo: fr-lezer houdt label');
+check(fm_translation_is_echo('Hallo', 'hallo ', 'fr', 'nl') && !fm_translation_is_echo('Hallo', 'Hallo', 'nl', 'nl') && !fm_translation_is_echo('Hallo', 'Hallo', 'fr', ''), 'echo: normalisatie en randgevallen');
+// Oude echo-rij in de DB telt als ontbrekend
+fm_db()->prepare("INSERT OR REPLACE INTO post_translations (post_id, lang, text, source_hash, updated_at) VALUES (?, 'fr', 'Goedemorgen allemaal', ?, 1)")->execute([$eid, fm_source_hash('Goedemorgen allemaal')]);
+check(!isset(fm_translations_for_posts([fm_get_post($eid)])[$eid]['fr']), 'echo: bestaande echo-rij genegeerd');
+
+// Opnieuw aanvragen
+fm_db()->prepare("UPDATE posts SET translation_status = 'done' WHERE id = ?")->execute([$eid]);
+check(fm_request_retranslation($eid), 'retry: aangevraagd');
+check_same('retry', fm_get_post($eid)['translation_status'], 'retry: status');
+check(!fm_can_request_retranslation(fm_get_post($eid)), 'retry: niet nogmaals');
+check(isset(fm_translations_for_posts([fm_get_post($eid)])[$eid]['en']), 'retry: vertalingen blijven staan');
+unset($GLOBALS['fmTranslateQueue']);
+$r = fm_translation_poll([$eid], 'en');
+check(isset($GLOBALS['fmTranslateQueue'][$eid]) && $r[$eid]['label'] === true && !isset($r[$eid]['html']), 'retry: poll claimt, label, nog geen oude html');
+$GLOBALS['fmTranslateQueue'] = [];
+check(!fm_can_request_retranslation(fm_get_post($eid)), 'retry: verse pending blokkeert');
+fm_db()->prepare('UPDATE posts SET translation_requested_at = 1 WHERE id = ?')->execute([$eid]);
+check(fm_can_request_retranslation(fm_get_post($eid)), 'retry: stale pending mag weer');
+check(trim((string) (fm_strings()['fr']['retranslate'] ?? '')) !== '', 'i18n retranslate');
 
 // i18n
 foreach (['nl', 'en', 'fr', 'de'] as $lg) {
