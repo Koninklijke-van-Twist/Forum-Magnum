@@ -9,7 +9,7 @@ declare(strict_types=1);
  *   van de auteur gaat alleen als sourceHint mee.
  * - posts.translation_status: '', pending, done, failed (alleen intern, geen UI).
  * - posts.translation_requested_at: unix-tijd van de laatste pending-claim; pending ouder dan
- *   FM_TRANSLATE_STALE_SECONDS telt als stale en mag opnieuw geclaimd worden.
+ *   syncTimeout + 60 s telt als stale en mag opnieuw geclaimd worden.
  * - posts.translation_failed_at / translation_attempts: backoff na timeout/cURL-fout
  *   (10 min → 1 u → 6 u → daarna max. 1×/dag).
  * - post_translations: per bericht en taal de vertaalde ruwe opmaaktekst + source_hash
@@ -22,8 +22,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/CoPilotTranslate.php';
 
-/** Pending ouder dan dit (seconden) mag opnieuw geclaimd worden. */
-const FM_TRANSLATE_STALE_SECONDS = 300;
+/** Pending ouder dan syncTimeout + dit (seconden) mag opnieuw geclaimd worden. */
+const FM_TRANSLATE_STALE_MARGIN = 60;
 
 /** Max. posts per request synchroon verwerken (≈ N × syncTimeout binnen set_time_limit). */
 const FM_TRANSLATE_PER_REQUEST = 1;
@@ -31,8 +31,21 @@ const FM_TRANSLATE_PER_REQUEST = 1;
 /** Standaard wachttijd (s) op de synchrone flow-Response; instelbaar via syncTimeout. */
 const FM_TRANSLATE_SYNC_TIMEOUT = 300;
 
-/** PHP-tijdslimiet per vertaling na het antwoord (syncTimeout + marge). */
-const FM_TRANSLATE_TIME_LIMIT = 330;
+/** PHP-tijdslimiet per vertaling na het antwoord = syncTimeout + dit. */
+const FM_TRANSLATE_TIME_MARGIN = 30;
+
+/** Stale-drempel: een claim is pas verlaten als de flow-wachttijd + marge voorbij is. */
+function fm_translate_stale_seconds(): int
+{
+    $config = fm_translate_config();
+
+    return (int) ceil(($config !== null ? fm_translate_sync_timeout($config) : (float) FM_TRANSLATE_SYNC_TIMEOUT)) + FM_TRANSLATE_STALE_MARGIN;
+}
+
+function fm_translate_time_limit(array $config): int
+{
+    return (int) ceil(fm_translate_sync_timeout($config)) + FM_TRANSLATE_TIME_MARGIN;
+}
 
 /** Backoff na mislukte poging n (1-based): 10 min, 1 u, 6 u; daarna 1 dag. */
 const FM_TRANSLATE_BACKOFF = [600, 3600, 21600];
@@ -72,7 +85,7 @@ function fm_translation_pending_stale(array $post): bool
     }
     $at = (int) ($post['translation_requested_at'] ?? 0);
 
-    return $at <= 0 || $at < time() - FM_TRANSLATE_STALE_SECONDS;
+    return $at <= 0 || $at < time() - fm_translate_stale_seconds();
 }
 
 /** Failed waarvan de backoff verstreken is. Zonder failed_at: alsof zojuist gefaald → nog niet klaar. */
@@ -102,7 +115,7 @@ function fm_claim_translation(int $postId, string $mode = 'any', ?int $now = nul
         return false;
     }
     $now ??= time();
-    $staleBefore = $now - FM_TRANSLATE_STALE_SECONDS;
+    $staleBefore = $now - fm_translate_stale_seconds();
     if ($mode === 'new') {
         $st = fm_db()->prepare("UPDATE posts SET translation_status = 'pending', translation_requested_at = ?
             WHERE id = ? AND (translation_status = ''
@@ -126,10 +139,10 @@ function fm_claim_translation(int $postId, string $mode = 'any', ?int $now = nul
  * Alleen een pending-rij wordt failed; met $claimedAt alleen als die claim nog van ons is
  * (requested_at ongewijzigd), zodat een nieuwere claim of een done-callback niet overschreven wordt.
  */
-function fm_mark_translation_failed(int $postId, ?int $claimedAt = null): void
+function fm_mark_translation_failed(int $postId, ?int $claimedAt = null): bool
 {
     if ($postId <= 0) {
-        return;
+        return false;
     }
     $sql = "UPDATE posts SET translation_status = 'failed', translation_failed_at = ?, translation_attempts = translation_attempts + 1
         WHERE id = ? AND translation_status = 'pending'";
@@ -138,7 +151,10 @@ function fm_mark_translation_failed(int $postId, ?int $claimedAt = null): void
         $sql .= ' AND translation_requested_at = ?';
         $args[] = $claimedAt;
     }
-    fm_db()->prepare($sql)->execute($args);
+    $st = fm_db()->prepare($sql);
+    $st->execute($args);
+
+    return $st->rowCount() > 0;
 }
 
 /** Legacy failed zonder klok: alleen de backoff-klok starten (attempts minstens 1); raakt nooit pending/done. */
@@ -171,11 +187,10 @@ function fm_run_translation_queue(): void
     }
     $finished = fm_finish_response();
     if ($finished) {
-        @set_time_limit(FM_TRANSLATE_TIME_LIMIT);
     }
     foreach ($ids as $id) {
         if ($finished) {
-            @set_time_limit(FM_TRANSLATE_TIME_LIMIT); // per post opnieuw: syncTimeout (300 s) + marge
+            @set_time_limit(fm_translate_time_limit(fm_translate_config() ?? [])); // per post: syncTimeout + 30 s
         }
         try {
             // Altijd volle sync-wachttijd na finish; zonder finish kort (CLI/tests/geen FPM).
@@ -222,12 +237,12 @@ function fm_finish_response(): bool
     return true;
 }
 
-/** Wachttijd voor de flow: expliciete $timeout, anders syncTimeout (default 300 s, max. 600). */
+/** Wachttijd voor de flow: expliciete $timeout, anders syncTimeout (default en max. 300 s). */
 function fm_translate_sync_timeout(array $config, ?float $timeout = null): float
 {
     $t = $timeout ?? (is_numeric($config['syncTimeout'] ?? null) ? (float) $config['syncTimeout'] : (float) FM_TRANSLATE_SYNC_TIMEOUT);
 
-    return max(1.0, min(600.0, $t));
+    return max(1.0, min((float) FM_TRANSLATE_SYNC_TIMEOUT, $t));
 }
 
 /** Laatste vertaalfout vastleggen (diagnose) en naar error_log. */
@@ -271,8 +286,15 @@ function fm_translate_post(int $postId, ?float $timeout = null): void
     $hint = fm_get_lang((string) $post['author']);
     $claimedAt = time();
     fm_claim_translation($postId, 'any', $claimedAt);
+    // Guard: wordt het script tijdens het wachten afgebroken (tijdslimiet/fatal), dan eigen claim → failed.
+    $GLOBALS['fmTranslateInflight'] = [$postId, $claimedAt];
+    if (empty($GLOBALS['fmTranslateGuard'])) {
+        $GLOBALS['fmTranslateGuard'] = true;
+        register_shutdown_function('fm_translation_abort_guard');
+    }
     $result = cpt_send($config, (string) $postId, $body, $hint !== '' ? $hint : null, $callbackUrl, $token,
         fm_translate_sync_timeout($config, $timeout), $status, $error);
+    $GLOBALS['fmTranslateInflight'] = null;
     if ($result !== null) {
         if (fm_store_translations($postId, $hash, $result['translations'], $result['source'])) {
             fm_db()->prepare("UPDATE posts SET translation_error = '' WHERE id = ?")->execute([$postId]);
@@ -495,4 +517,20 @@ function fm_translation_badge_html(array $post, array $translations, string $lan
     }
 
     return '';
+}
+
+/** Shutdown-guard: een nog lopende eigen claim (script afgebroken) op failed zetten. */
+function fm_translation_abort_guard(): void
+{
+    $inflight = $GLOBALS['fmTranslateInflight'] ?? null;
+    $GLOBALS['fmTranslateInflight'] = null;
+    if (!is_array($inflight)) {
+        return;
+    }
+    try {
+        if (fm_mark_translation_failed((int) $inflight[0], (int) $inflight[1])) {
+            fm_translation_error((int) $inflight[0], 'script afgebroken tijdens wachten op de flow (tijdslimiet?)');
+        }
+    } catch (Throwable) {
+    }
 }

@@ -86,7 +86,7 @@ $GLOBALS['fmTranslateQueue'] = [];
 
 // Stale pending (>5 min) mag opnieuw
 fm_db()->prepare('UPDATE posts SET translation_status = ?, translation_requested_at = ? WHERE id = ?')
-    ->execute(['pending', time() - FM_TRANSLATE_STALE_SECONDS - 10, $lazyId]);
+    ->execute(['pending', time() - fm_translate_stale_seconds() - 10, $lazyId]);
 unset($GLOBALS['fmTranslateQueue']);
 fm_queue_translations_on_view([fm_get_post($lazyId)], []);
 check(isset($GLOBALS['fmTranslateQueue'][$lazyId]), 'lazy: stale pending opnieuw in wachtrij');
@@ -229,6 +229,23 @@ check(str_contains($adm, 'data-translation-error="cURL: &lt;timeout&gt;"') && st
 check(str_contains(fm_translation_badge_html($fp, [], 'en', false), 'data-translation-pending="7"'), 'badge: gebruiker pending zolang pogingen');
 check_same('', fm_translation_badge_html(['translation_attempts' => FM_TRANSLATE_LABEL_MAX_ATTEMPTS] + $fp, [], 'en', false), 'badge: gebruiker niets als pogingen op');
 check_same('', fm_translation_badge_html($fp, ['en' => 'x'], 'en', true), 'badge: niets met vertaling');
+
+// Timeouts afgeleid van syncTimeout
+check_same(300.0, fm_translate_sync_timeout(['syncTimeout' => 900]), 'syncTimeout max 300');
+check_same(120.0, fm_translate_sync_timeout(['syncTimeout' => 120]), 'syncTimeout instelbaar');
+check_same(150, fm_translate_time_limit(['syncTimeout' => 120]), 'time limit = sync + 30');
+check_same((int) fm_translate_sync_timeout(fm_translate_config()) + 60, fm_translate_stale_seconds(), 'stale = sync + 60');
+// Abort-guard: eigen claim -> failed, andere claim niet
+$gid = fm_first_post_id(fm_create_thread('general', 'jan@kvt.nl', 'Guard', 'Guard'));
+fm_claim_translation($gid, 'any', 1000);
+$GLOBALS['fmTranslateInflight'] = [$gid, 999];
+fm_translation_abort_guard();
+check_same('pending', fm_get_post($gid)['translation_status'], 'guard: andere claim blijft');
+$GLOBALS['fmTranslateInflight'] = [$gid, 1000];
+fm_translation_abort_guard();
+check_same('failed', fm_get_post($gid)['translation_status'], 'guard: eigen claim failed');
+check(str_contains((string) fm_get_post($gid)['translation_error'], 'afgebroken'), 'guard: fout opgeslagen');
+$GLOBALS['fmTranslateQueue'] = [];
 
 // i18n
 foreach (['nl', 'en', 'fr', 'de'] as $lg) {
