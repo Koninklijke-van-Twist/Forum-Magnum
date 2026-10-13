@@ -529,13 +529,16 @@ function fm_translation_poll(array $ids, string $lang, bool $isAdmin = false): a
         $fresh = fm_get_post($id) ?? $p; // status na een eventuele claim
         $status = (string) ($fresh['translation_status'] ?? '');
         $row = ['status' => $status === '' ? 'none' : $status, 'label' => fm_translation_label_needed($fresh, $translations[$id] ?? [], $lang),
-            'badge' => fm_translation_badge_html($fresh, $translations[$id] ?? [], $lang, $isAdmin)];
+            'badge' => fm_translation_badge_html($fresh, $translations[$id] ?? [], $lang, $isAdmin),
+            'poll' => fm_translation_poll_needed($fresh, $translations[$id] ?? [], $lang),
+            'next_retry_at' => fm_translation_next_retry_at($fresh)];
         $text = $row['label'] ? null : fm_pick_translation($fresh, $translations[$id] ?? [], $lang);
         if ($text !== null) {
             $row['html'] = renderTicketMessageMarkdown($text, 0, $attachments[$id] ?? []);
             $row['lang'] = FM_LANGUAGES[$lang][1] ?? $lang;
             $row['label'] = false;
             $row['badge'] = '';
+            $row['poll'] = false;
         }
         $out[$id] = $row;
     }
@@ -616,4 +619,39 @@ function fm_request_retranslation(int $postId): bool
     $st->execute([$postId, time() - fm_translate_stale_seconds()]);
 
     return $st->rowCount() > 0;
+}
+
+/**
+ * Moet de pagina deze post blijven pollen? Zoals het label, maar zonder pogingenplafond:
+ * ook failed-posts (zonder label of met admin-badge) zodat de poll de retry kan starten.
+ */
+function fm_translation_poll_needed(array $post, array $translations, string $lang): bool
+{
+    if (fm_translate_config() === null || !empty($post['deleted_at']) || trim((string) ($post['body'] ?? '')) === '') {
+        return false;
+    }
+    $status = (string) ($post['translation_status'] ?? '');
+    if ((string) ($post['source_lang'] ?? '') === $lang) {
+        return false;
+    }
+    if (isset($translations[$lang])) {
+        return $status === 'retry' || $status === 'pending';
+    }
+
+    return $status !== 'done';
+}
+
+/** Unix-tijd waarop een failed-post weer mag (0 = nu / n.v.t.). */
+function fm_translation_next_retry_at(array $post): int
+{
+    if (($post['translation_status'] ?? '') !== 'failed') {
+        return 0;
+    }
+    $failedAt = (int) ($post['translation_failed_at'] ?? 0);
+    if ($failedAt <= 0) {
+        return time() + fm_translation_backoff_seconds(1); // klok start bij deze poll
+    }
+    $at = $failedAt + fm_translation_backoff_seconds(max(1, (int) ($post['translation_attempts'] ?? 0)));
+
+    return $at > time() ? $at : 0;
 }

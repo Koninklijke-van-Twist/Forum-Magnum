@@ -292,6 +292,19 @@ fm_db()->prepare('UPDATE posts SET translation_requested_at = 1 WHERE id = ?')->
 check(fm_can_request_retranslation(fm_get_post($eid)), 'retry: stale pending mag weer');
 check(trim((string) (fm_strings()['fr']['retranslate'] ?? '')) !== '', 'i18n retranslate');
 
+// Poll-attribuut en next_retry_at
+$fx = ['translation_status' => 'failed', 'translation_attempts' => FM_TRANSLATE_LABEL_MAX_ATTEMPTS, 'translation_failed_at' => time()] + $lp;
+check(fm_translation_poll_needed($fx, [], 'en') && !fm_translation_label_needed($fx, [], 'en'), 'poll: failed zonder label blijft gepolld');
+check(!fm_translation_poll_needed(['translation_status' => 'done'] + $lp, [], 'en'), 'poll: done niet');
+check_same(time() + FM_TRANSLATE_BACKOFF_DAILY, fm_translation_next_retry_at($fx), 'next_retry_at: daily na veel pogingen');
+check_same(0, fm_translation_next_retry_at(['translation_failed_at' => time() - 700, 'translation_attempts' => 1] + $fx), 'next_retry_at: 0 als backoff voorbij');
+$nid = fm_first_post_id(fm_create_thread('general', 'jan@kvt.nl', 'Nx', 'Nx tekst'));
+fm_db()->prepare("UPDATE posts SET translation_status = 'failed', translation_failed_at = ?, translation_attempts = 1 WHERE id = ?")->execute([time(), $nid]);
+unset($GLOBALS['fmTranslateQueue']);
+$r = fm_translation_poll([$nid], 'en');
+check(!isset($GLOBALS['fmTranslateQueue'][$nid]) && $r[$nid]['next_retry_at'] === time() + 600 && $r[$nid]['poll'] === true, 'poll: backoff respecteren + next_retry_at');
+$GLOBALS['fmTranslateQueue'] = [];
+
 // i18n
 foreach (['nl', 'en', 'fr', 'de'] as $lg) {
     foreach (['translation_pending', 'translation_failed', 'translation_error_title', 'translation_attempts_n', 'translation_last_try'] as $k) {
