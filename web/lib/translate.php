@@ -224,15 +224,23 @@ function fm_run_translation_queue(): void
  */
 function fm_finish_response(): bool
 {
-    if (PHP_SAPI === 'cli' || PHP_SAPI === 'phpdbg' || headers_sent()) {
+    if (PHP_SAPI === 'cli' || PHP_SAPI === 'phpdbg') {
         return false;
     }
+    // Altijd: browser-afbreken mag het werk niet stoppen, sessie niet vasthouden.
+    ignore_user_abort(true);
     if (session_status() === PHP_SESSION_ACTIVE) {
         session_write_close();
     }
-    ignore_user_abort(true);
     if (function_exists('fastcgi_finish_request')) {
         return (bool) @fastcgi_finish_request();
+    }
+    if (headers_sent()) {
+        return false;
+    }
+    @ini_set('zlib.output_compression', '0');
+    if (function_exists('apache_setenv')) {
+        @apache_setenv('no-gzip', '1'); // mod_deflate zou Content-Length/flush ongedaan maken
     }
     $out = '';
     while (ob_get_level() > 0) {

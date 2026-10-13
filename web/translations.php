@@ -9,6 +9,9 @@ declare(strict_types=1);
  */
 require __DIR__ . '/lib/bootstrap.php';
 
+// Antwoord bufferen: zo zijn de headers nog niet verstuurd als de worker het antwoord afsluit.
+ob_start();
+
 if (session_status() === PHP_SESSION_ACTIVE) {
     session_write_close();
 }
