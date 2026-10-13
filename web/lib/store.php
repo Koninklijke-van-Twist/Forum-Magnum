@@ -400,7 +400,8 @@ function fm_edit_post(int $postId, string $email, string $body, ?string $title =
         if ($body !== (string) $post['body'] && function_exists('fm_queue_translation')) {
             // Oude vertalingen kloppen niet meer; source_hash laat late callbacks afketsen.
             $pdo->prepare('DELETE FROM post_translations WHERE post_id = ?')->execute([$postId]);
-            $pdo->prepare("UPDATE posts SET source_lang = '', translation_attempts = 0, translation_failed_at = 0 WHERE id = ?")->execute([$postId]);
+            // Status terug naar 'nooit aangevraagd': de poll (translations.php) pakt het op.
+            $pdo->prepare("UPDATE posts SET source_lang = '', translation_status = '', translation_requested_at = 0, translation_attempts = 0, translation_failed_at = 0, translation_error = '' WHERE id = ?")->execute([$postId]);
             fm_queue_translation($postId);
         }
         fm_attach_files($pdo, $postId, $files, $now);

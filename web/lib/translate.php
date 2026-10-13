@@ -165,10 +165,23 @@ function fm_start_failed_clock(int $postId): void
         ->execute([time(), $postId]);
 }
 
-/** Bericht na COMMIT laten vertalen; de request loopt (na fastcgi_finish_request) door in een shutdown-functie. */
+/**
+ * Pagina-requests (thread, post, bewerken) doen nooit sync flow-werk: zonder worker-context
+ * gebeurt hier niets (status '' = nooit aangevraagd; de poll claimt). Alleen translations.php
+ * (asynchrone AJAX-poll) zet fm_translation_worker(true) en verwerkt de queue na het antwoord.
+ */
+function fm_translation_worker(?bool $set = null): bool
+{
+    if ($set !== null) {
+        $GLOBALS['fmTranslateWorker'] = $set;
+    }
+
+    return !empty($GLOBALS['fmTranslateWorker']);
+}
+
 function fm_queue_translation(int $postId): void
 {
-    if (fm_translate_config() === null || $postId <= 0) {
+    if (!fm_translation_worker() || fm_translate_config() === null || $postId <= 0) {
         return;
     }
     if (!isset($GLOBALS['fmTranslateQueue'])) {
@@ -185,16 +198,15 @@ function fm_run_translation_queue(): void
     if ($ids === []) {
         return;
     }
-    $finished = fm_finish_response();
-    if ($finished) {
-    }
+    fm_finish_response(); // FPM of flush; lukt dat niet, dan wacht de (asynchrone) poll gewoon langer
     foreach ($ids as $id) {
-        if ($finished) {
+        if (PHP_SAPI !== 'cli') {
             @set_time_limit(fm_translate_time_limit(fm_translate_config() ?? [])); // per post: syncTimeout + 30 s
         }
         try {
             // Altijd volle sync-wachttijd na finish; zonder finish kort (CLI/tests/geen FPM).
-            fm_translate_post((int) $id, $finished ? null : 1.5);
+            // Worker (poll): de browser wacht asynchroon, dus altijd de volle syncTimeout; alleen CLI/tests kort.
+            fm_translate_post((int) $id, PHP_SAPI === 'cli' ? 1.5 : null);
         } catch (Throwable $e) {
             fm_translation_error((int) $id, 'exception: ' . $e->getMessage());
             try {
@@ -212,7 +224,7 @@ function fm_run_translation_queue(): void
  */
 function fm_finish_response(): bool
 {
-    if (PHP_SAPI === 'cli' || PHP_SAPI === 'phpdbg') {
+    if (PHP_SAPI === 'cli' || PHP_SAPI === 'phpdbg' || headers_sent()) {
         return false;
     }
     if (session_status() === PHP_SESSION_ACTIVE) {
@@ -326,7 +338,7 @@ function fm_store_translations(int $postId, string $hash, array $translations, ?
                 $st->execute([$postId, (string) $lang, fm_clean_text($text, 40000), $hash, $now]);
             }
         }
-        $pdo->prepare("UPDATE posts SET translation_status = 'done', translation_attempts = 0, translation_failed_at = 0,
+        $pdo->prepare("UPDATE posts SET translation_status = 'done', translation_attempts = 0, translation_failed_at = 0, translation_error = '',
             source_lang = CASE WHEN ? <> '' THEN ? ELSE source_lang END WHERE id = ?")
             ->execute([(string) $source, (string) $source, $postId]);
 
@@ -366,7 +378,7 @@ function fm_translations_for_posts(array $posts): array
  */
 function fm_queue_translations_on_view(array $posts, array $translationsByPost, int $limit = FM_TRANSLATE_PER_REQUEST): void
 {
-    if (fm_translate_config() === null || $limit <= 0) {
+    if (!fm_translation_worker() || fm_translate_config() === null || $limit <= 0) {
         return;
     }
     foreach ($posts as $p) {
