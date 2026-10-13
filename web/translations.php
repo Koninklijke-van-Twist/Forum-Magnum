@@ -19,6 +19,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
     echo '{}';
     exit;
 }
-$result = fm_translation_poll(fm_parse_poll_ids((string) ($_GET['ids'] ?? '')), fm_lang());
+$result = fm_translation_poll(fm_parse_poll_ids((string) ($_GET['ids'] ?? '')), fm_lang(), $fmIsAdmin);
 echo json_encode(['posts' => (object) $result], JSON_UNESCAPED_UNICODE);
 // Shutdown: fm_run_translation_queue roept fastcgi_finish_request aan vóór het sync werk.

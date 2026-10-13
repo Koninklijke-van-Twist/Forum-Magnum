@@ -426,7 +426,7 @@ function fm_parse_poll_ids(string $raw): array
  *
  * @return array<int, array{status:string, label:bool, html?:string, lang?:string}>
  */
-function fm_translation_poll(array $ids, string $lang): array
+function fm_translation_poll(array $ids, string $lang, bool $isAdmin = false): array
 {
     $posts = [];
     foreach ($ids as $id) {
@@ -443,15 +443,40 @@ function fm_translation_poll(array $ids, string $lang): array
         $id = (int) $p['id'];
         $fresh = fm_get_post($id) ?? $p; // status na een eventuele claim
         $status = (string) ($fresh['translation_status'] ?? '');
-        $row = ['status' => $status === '' ? 'none' : $status, 'label' => fm_translation_label_needed($fresh, $translations[$id] ?? [], $lang)];
+        $row = ['status' => $status === '' ? 'none' : $status, 'label' => fm_translation_label_needed($fresh, $translations[$id] ?? [], $lang),
+            'badge' => fm_translation_badge_html($fresh, $translations[$id] ?? [], $lang, $isAdmin)];
         $text = fm_pick_translation($fresh, $translations[$id] ?? [], $lang);
         if ($text !== null) {
             $row['html'] = renderTicketMessageMarkdown($text, 0, $attachments[$id] ?? []);
             $row['lang'] = FM_LANGUAGES[$lang][1] ?? $lang;
             $row['label'] = false;
+            $row['badge'] = '';
         }
         $out[$id] = $row;
     }
 
     return $out;
+}
+
+/**
+ * HTML naast #id: beheerders zien bij failed 'Vertaling mislukt' (klik = modal met fout, tijdstip,
+ * pogingen); verder het pending-label zolang fm_translation_label_needed. Anders ''.
+ */
+function fm_translation_badge_html(array $post, array $translations, string $lang, bool $isAdmin): string
+{
+    $id = (int) ($post['id'] ?? 0);
+    if ($isAdmin && fm_translate_config() !== null && empty($post['deleted_at']) && ($post['translation_status'] ?? '') === 'failed'
+        && !isset($translations[$lang])) {
+        $at = (int) ($post['translation_failed_at'] ?? 0);
+
+        return ' <button type="button" class="translation-pending is-failed" data-translation-error="' . h((string) ($post['translation_error'] ?? '') ?: '-') . '"'
+            . ' data-title="' . h(fm_t('translation_error_title') . ' (post#' . $id . ')') . '"'
+            . ' data-meta="' . h(($at > 0 ? fm_t('translation_last_try', fm_format_time($at)) . ' · ' : '') . fm_t('translation_attempts_n', (int) ($post['translation_attempts'] ?? 0))) . '"'
+            . ' data-close-label="' . h(fm_t('close')) . '">' . h(fm_t('translation_failed')) . '</button>';
+    }
+    if (fm_translation_label_needed($post, $translations, $lang)) {
+        return ' <span class="translation-pending" data-translation-pending="' . $id . '">' . h(fm_t('translation_pending')) . '</span>';
+    }
+
+    return '';
 }

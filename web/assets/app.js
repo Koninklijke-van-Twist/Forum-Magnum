@@ -311,7 +311,10 @@ document.addEventListener('click', function (e) {
                 body.parentNode.insertBefore(btn, body.nextSibling);
             }
         }
-        if (label && (info.html || !info.label)) { label.remove(); }
+        if (label && (info.html || !info.label || info.badge)) {
+            if (info.badge && !info.html) { label.insertAdjacentHTML('afterend', info.badge.trim()); }
+            label.remove();
+        }
     }
     function schedule() {
         clearTimeout(timer);
@@ -339,3 +342,20 @@ document.addEventListener('click', function (e) {
     });
     schedule();
 })();
+// Beheerders: 'Vertaling mislukt' => modal met fouttekst, tijdstip en pogingen.
+document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-translation-error]');
+    if (!b) { return; }
+    var d = document.createElement('dialog');
+    d.className = 'translation-error-modal';
+    var h = document.createElement('h2'); h.textContent = b.getAttribute('data-title');
+    var m = document.createElement('p'); m.className = 'muted'; m.textContent = b.getAttribute('data-meta');
+    var pre = document.createElement('pre'); pre.textContent = b.getAttribute('data-translation-error');
+    var c = document.createElement('button'); c.type = 'button'; c.className = 'btn'; c.textContent = b.getAttribute('data-close-label');
+    c.addEventListener('click', function () { d.close(); });
+    d.append(h, m, pre, c);
+    d.addEventListener('close', function () { d.remove(); });
+    d.addEventListener('click', function (ev) { if (ev.target === d) { d.close(); } });
+    document.body.appendChild(d);
+    d.showModal();
+});

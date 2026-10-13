@@ -219,12 +219,22 @@ $many = [];
 for ($i = 0; $i < 4; $i++) { $many[] = fm_first_post_id(fm_create_thread('general', 'jan@kvt.nl', 'T' . $i, 'Tekst ' . $i)); }
 unset($GLOBALS['fmTranslateQueue']);
 fm_translation_poll($many, 'en');
-check_same(2, count($GLOBALS['fmTranslateQueue'] ?? []), 'poll: max 2 in queue');
+check_same(FM_TRANSLATE_PER_REQUEST, count($GLOBALS['fmTranslateQueue'] ?? []), 'poll: max per request in queue');
 $GLOBALS['fmTranslateQueue'] = [];
+
+// Badge: admin ziet 'mislukt' met fout, gebruiker pending-label
+$fp = ['id' => 7, 'translation_status' => 'failed', 'translation_attempts' => 2, 'translation_failed_at' => time(), 'translation_error' => 'cURL: <timeout>'] + $lp;
+$adm = fm_translation_badge_html($fp, [], 'en', true);
+check(str_contains($adm, 'data-translation-error="cURL: &lt;timeout&gt;"') && str_contains($adm, fm_t('translation_failed')), 'badge: admin mislukt + ge-escapete fout');
+check(str_contains(fm_translation_badge_html($fp, [], 'en', false), 'data-translation-pending="7"'), 'badge: gebruiker pending zolang pogingen');
+check_same('', fm_translation_badge_html(['translation_attempts' => FM_TRANSLATE_LABEL_MAX_ATTEMPTS] + $fp, [], 'en', false), 'badge: gebruiker niets als pogingen op');
+check_same('', fm_translation_badge_html($fp, ['en' => 'x'], 'en', true), 'badge: niets met vertaling');
 
 // i18n
 foreach (['nl', 'en', 'fr', 'de'] as $lg) {
-    check(trim((string) (fm_strings()[$lg]['translation_pending'] ?? '')) !== '', "i18n translation_pending $lg");
+    foreach (['translation_pending', 'translation_failed', 'translation_error_title', 'translation_attempts_n', 'translation_last_try'] as $k) {
+        check(trim((string) (fm_strings()[$lg][$k] ?? '')) !== '', "i18n $k $lg");
+    }
 }
 
 $GLOBALS['copilotTranslate'] = null;
