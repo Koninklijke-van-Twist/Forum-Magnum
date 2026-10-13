@@ -20,8 +20,8 @@ check_same([], fm_thread_updates($thread, $v0 + 10, 1, 0, 'piet@kvt.nl', false)[
 fm_db()->exec('DROP TRIGGER trg_posts_touch');
 fm_db()->prepare('UPDATE posts SET updated_at = 100 WHERE id = ?')->execute([$first]);
 fm_db()->exec("CREATE TRIGGER trg_posts_touch AFTER UPDATE ON posts WHEN NEW.updated_at = OLD.updated_at
-    BEGIN UPDATE posts SET updated_at = CAST(strftime('%s', 'now') AS INTEGER) WHERE id = NEW.id; END");
-$since = 101;
+    BEGIN UPDATE posts SET updated_at = (SELECT COALESCE(MAX(updated_at), 0) + 1 FROM posts) WHERE id = NEW.id; END");
+$since = 100;
 $reply = fm_reply($tid, 'piet@kvt.nl', 'Nieuw antwoord van piet');
 $u = fm_thread_updates($thread, $since, 1, 0, 'jan@kvt.nl', false);
 check(isset($u['posts'][$reply]) && !isset($u['posts'][$first]), 'alleen gewijzigde posts');
@@ -35,7 +35,7 @@ check(fm_last_read($tid, 'jan@kvt.nl') >= $reply, 'gelezen zoals bij gewone weer
 fm_db()->exec('DROP TRIGGER trg_posts_touch');
 fm_db()->prepare('UPDATE posts SET updated_at = 100 WHERE id = ?')->execute([$reply]);
 fm_db()->exec("CREATE TRIGGER trg_posts_touch AFTER UPDATE ON posts WHEN NEW.updated_at = OLD.updated_at
-    BEGIN UPDATE posts SET updated_at = CAST(strftime('%s', 'now') AS INTEGER) WHERE id = NEW.id; END");
+    BEGIN UPDATE posts SET updated_at = (SELECT COALESCE(MAX(updated_at), 0) + 1 FROM posts) WHERE id = NEW.id; END");
 fm_edit_post($reply, 'piet@kvt.nl', 'Aangepast antwoord');
 check((int) fm_get_post($reply)['updated_at'] > 100, 'bewerken verhoogt updated_at');
 $u = fm_thread_updates($thread, $since, 1, 0, 'jan@kvt.nl', false);
@@ -49,7 +49,7 @@ $p3 = fm_reply($tid, 'jan@kvt.nl', 'Nog een bericht om te vertalen');
 fm_db()->exec('DROP TRIGGER trg_posts_touch');
 fm_db()->prepare('UPDATE posts SET updated_at = 100 WHERE id = ?')->execute([$p3]);
 fm_db()->exec("CREATE TRIGGER trg_posts_touch AFTER UPDATE ON posts WHEN NEW.updated_at = OLD.updated_at
-    BEGIN UPDATE posts SET updated_at = CAST(strftime('%s', 'now') AS INTEGER) WHERE id = NEW.id; END");
+    BEGIN UPDATE posts SET updated_at = (SELECT COALESCE(MAX(updated_at), 0) + 1 FROM posts) WHERE id = NEW.id; END");
 fm_store_translations($p3, fm_source_hash('Nog een bericht om te vertalen'), ['nl' => 'a', 'en' => 'Another post', 'fr' => 'c', 'de' => 'd'], 'nl');
 check((int) fm_get_post($p3)['updated_at'] > 100, 'vertaling verhoogt updated_at');
 
@@ -64,6 +64,26 @@ check(fm_last_read($tid, 'piet@kvt.nl') < $last, 'niet gelezen als hij niet op d
 // Edit-form open: render met editId geeft formulier (client vervangt hem niet)
 $u = fm_thread_updates($thread, $since, 1, $p3, 'jan@kvt.nl', false);
 check(str_contains($u['posts'][$p3]['html'] ?? '', 'name="action" value="edit"'), 'edit-context doorgegeven');
+
+// Twee wijzigingen in dezelfde seconde: elk een nieuwe, hogere versie
+$a1 = (int) fm_get_post($p3)['updated_at'];
+fm_edit_post($p3, 'jan@kvt.nl', 'Snel 1');
+$a2 = (int) fm_get_post($p3)['updated_at'];
+fm_edit_post($p3, 'jan@kvt.nl', 'Snel 2');
+$a3 = (int) fm_get_post($p3)['updated_at'];
+check($a1 < $a2 && $a2 < $a3, 'versie stijgt ook binnen dezelfde seconde');
+$u = fm_thread_updates($thread, $a2, 1, 0, 'jan@kvt.nl', false);
+check(str_contains($u['posts'][$p3]['html'] ?? '', 'Snel 2'), 'tweede snelle wijziging komt door');
+// Batchlimiet: cursor niet voorbij de laatst geleverde versie
+$t2 = fm_create_thread('general', 'jan@kvt.nl', 'Veel', 'start');
+$th2 = fm_get_thread($t2);
+$v = fm_thread_version($t2);
+for ($i = 0; $i < 105; $i++) { fm_reply($t2, 'jan@kvt.nl', 'b' . $i); }
+$u1 = fm_thread_updates($th2, $v, 1, 0, 'piet@kvt.nl', false);
+check_same(100, count($u1['posts']), 'batch van 100');
+$u2 = fm_thread_updates($th2, $u1['since'], 1, 0, 'piet@kvt.nl', false);
+check_same(5, count($u2['posts']), 'rest bij de volgende poll');
+check_same(fm_thread_version($t2), $u2['since'], 'cursor daarna op de threadversie');
 
 // i18n
 foreach (['nl', 'en', 'fr', 'de'] as $lg) {

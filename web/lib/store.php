@@ -199,17 +199,19 @@ function fm_migrate(PDO $pdo): void
                 WHERE translation_status = 'failed'");
         }
         if ($version < 9) {
-            // Versie per bericht voor live threads: verandert bij nieuw, bewerkt, verwijderd en (nieuwe) vertaling/status.
+            // Versie per bericht voor live threads (globaal oplopend, uniek; start boven de oude tijdstempels):
+            // verandert bij nieuw, bewerkt, verwijderd en (nieuwe) vertaling/status.
             $cols = array_column($pdo->query('PRAGMA table_info(posts)')->fetchAll(), 'name');
             if (!in_array('updated_at', $cols, true)) {
                 $pdo->exec('ALTER TABLE posts ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0');
             }
             $pdo->exec('UPDATE posts SET updated_at = MAX(created_at, COALESCE(edited_at, 0), COALESCE(deleted_at, 0)) WHERE updated_at = 0');
             $pdo->exec('CREATE INDEX IF NOT EXISTS idx_posts_thread_updated ON posts(thread_id, updated_at)');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_posts_updated ON posts(updated_at)'); // MAX(updated_at) voor de volgende versie
             $pdo->exec("CREATE TRIGGER IF NOT EXISTS trg_posts_insert_updated AFTER INSERT ON posts
-                BEGIN UPDATE posts SET updated_at = CAST(strftime('%s', 'now') AS INTEGER) WHERE id = NEW.id; END");
+                BEGIN UPDATE posts SET updated_at = (SELECT COALESCE(MAX(updated_at), 0) + 1 FROM posts) WHERE id = NEW.id; END");
             $pdo->exec("CREATE TRIGGER IF NOT EXISTS trg_posts_touch AFTER UPDATE ON posts WHEN NEW.updated_at = OLD.updated_at
-                BEGIN UPDATE posts SET updated_at = CAST(strftime('%s', 'now') AS INTEGER) WHERE id = NEW.id; END");
+                BEGIN UPDATE posts SET updated_at = (SELECT COALESCE(MAX(updated_at), 0) + 1 FROM posts) WHERE id = NEW.id; END");
         }
         $pdo->exec('PRAGMA user_version = ' . FM_SCHEMA_VERSION);
         $pdo->exec('COMMIT');
@@ -646,10 +648,10 @@ function fm_set_lang(string $email, string $lang): void
         ->execute([strtolower($email), $lang]);
 }
 
-/** Berichten van een thread die sinds $since (unix, inclusief) gewijzigd zijn; indexquery op updated_at. */
+/** Berichten van een thread met versie > $since, oplopend op versie; indexquery op (thread_id, updated_at). */
 function fm_posts_updated_since(int $threadId, int $since, int $limit = 100): array
 {
-    $st = fm_db()->prepare('SELECT * FROM posts WHERE thread_id = ? AND updated_at >= ? ORDER BY id ASC LIMIT ?');
+    $st = fm_db()->prepare('SELECT * FROM posts WHERE thread_id = ? AND updated_at > ? ORDER BY updated_at ASC LIMIT ?');
     $st->bindValue(1, $threadId, PDO::PARAM_INT);
     $st->bindValue(2, $since, PDO::PARAM_INT);
     $st->bindValue(3, $limit, PDO::PARAM_INT);

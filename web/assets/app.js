@@ -394,7 +394,12 @@ document.addEventListener('click', function (e) {
         } else if (!timer && !busy) { step = 0; schedule(); }
     });
     // Live-thread voegt posts in: daarna (opnieuw) beginnen als er iets te pollen is.
-    window.fmTranslationPollKick = function () { if (!timer && !busy) { step = 0; schedule(); } };
+    window.fmTranslationPollKick = function () {
+        // Nieuw ingevoegde posts: budget en overgeslagen ids resetten en meteen (opnieuw) plannen.
+        dropped = {};
+        if (remainingMs() <= 0) { usedMs = 0; visibleSince = document.hidden ? 0 : Date.now(); }
+        if (!busy) { clearTimeout(timer); timer = null; step = 0; schedule(); }
+    };
     schedule();
 })();
 // Beheerders: 'Vertaling mislukt' => modal met fouttekst, tijdstip en pogingen.

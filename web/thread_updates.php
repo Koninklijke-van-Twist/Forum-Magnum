@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * Live-thread (alleen lezen, achter de forumlogin): GET ?thread=&since=&page=&edit=&ids=
  * => {"since":..,"pages":..,"last_url":..,"posts":{"12":{"updated_at":..,"page":..,"deleted":false,"html":"<article…>"}}}.
- * Indexquery op posts(thread_id, updated_at); geen externe diensten. ids = posts die nog een
+ * updated_at is een oplopende versie; indexquery op posts(thread_id, updated_at); geen externe diensten. ids = posts die nog een
  * vertaling nodig hebben: die worden (max. 1) geclaimd en na het antwoord vertaald.
  */
 require __DIR__ . '/lib/bootstrap.php';
