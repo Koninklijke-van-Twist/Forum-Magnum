@@ -90,12 +90,12 @@ function fm_translation_failed_ready(array $post): bool
  * - 'failed': failed (backoff al gecheckt door caller) of stale pending
  * - 'any': altijd (zoals bij directe queue na write)
  */
-function fm_claim_translation(int $postId, string $mode = 'any'): bool
+function fm_claim_translation(int $postId, string $mode = 'any', ?int $now = null): bool
 {
     if ($postId <= 0) {
         return false;
     }
-    $now = time();
+    $now ??= time();
     $staleBefore = $now - FM_TRANSLATE_STALE_SECONDS;
     if ($mode === 'new') {
         $st = fm_db()->prepare("UPDATE posts SET translation_status = 'pending', translation_requested_at = ?
@@ -117,22 +117,30 @@ function fm_claim_translation(int $postId, string $mode = 'any'): bool
 
 /**
  * Alle failed-paden (sync-timeout, cURL, unparseable callback): failed_at=nu, attempts++.
- * Failed zonder klok (legacy): start failed_at zonder extra attempt (minstens attempts=1).
+ * Alleen een pending-rij wordt failed; met $claimedAt alleen als die claim nog van ons is
+ * (requested_at ongewijzigd), zodat een nieuwere claim of een done-callback niet overschreven wordt.
  */
-function fm_mark_translation_failed(int $postId): void
+function fm_mark_translation_failed(int $postId, ?int $claimedAt = null): void
 {
     if ($postId <= 0) {
         return;
     }
-    $now = time();
-    fm_db()->prepare("UPDATE posts SET translation_status = 'failed', translation_failed_at = ?,
-        translation_attempts = CASE
-            WHEN translation_status = 'pending' THEN translation_attempts + 1
-            WHEN translation_attempts < 1 THEN 1
-            ELSE translation_attempts
-        END
-        WHERE id = ? AND (translation_status = 'pending'
-            OR (translation_status = 'failed' AND translation_failed_at = 0))")->execute([$now, $postId]);
+    $sql = "UPDATE posts SET translation_status = 'failed', translation_failed_at = ?, translation_attempts = translation_attempts + 1
+        WHERE id = ? AND translation_status = 'pending'";
+    $args = [time(), $postId];
+    if ($claimedAt !== null) {
+        $sql .= ' AND translation_requested_at = ?';
+        $args[] = $claimedAt;
+    }
+    fm_db()->prepare($sql)->execute($args);
+}
+
+/** Legacy failed zonder klok: alleen de backoff-klok starten (attempts minstens 1); raakt nooit pending/done. */
+function fm_start_failed_clock(int $postId): void
+{
+    fm_db()->prepare("UPDATE posts SET translation_failed_at = ?, translation_attempts = MAX(translation_attempts, 1)
+        WHERE id = ? AND translation_status = 'failed' AND (translation_failed_at IS NULL OR translation_failed_at = 0)")
+        ->execute([time(), $postId]);
 }
 
 /** Bericht na COMMIT laten vertalen; de request loopt (na fastcgi_finish_request) door in een shutdown-functie. */
@@ -210,7 +218,8 @@ function fm_translate_post(int $postId, ?float $timeout = null): void
     $token = cpt_make_token((string) $config['callbackSecret'], (string) $postId, $hash);
     $callbackUrl = fm_translate_callback_base($config) . '/translate_callback.php?' . http_build_query(['id' => $postId, 'h' => $hash]);
     $hint = fm_get_lang((string) $post['author']);
-    fm_claim_translation($postId, 'any');
+    $claimedAt = time();
+    fm_claim_translation($postId, 'any', $claimedAt);
     $result = cpt_send($config, (string) $postId, $body, $hint !== '' ? $hint : null, $callbackUrl, $token,
         min(110.0, $timeout ?? (float) ($config['syncTimeout'] ?? 90)), $status);
     if ($result !== null) {
@@ -218,7 +227,7 @@ function fm_translate_post(int $postId, ?float $timeout = null): void
     } elseif ($status < 200 || $status >= 300) {
         // Timeout of cURL/HTTP-fout: failed + attempts; backoff bepaalt de volgende poging.
         // 2xx zonder bruikbare body = asynchroon geaccepteerd; blijft pending tot callback of stale.
-        fm_mark_translation_failed($postId);
+        fm_mark_translation_failed($postId, $claimedAt);
     }
 }
 
@@ -303,7 +312,7 @@ function fm_queue_translations_on_view(array $posts, array $translationsByPost, 
         } elseif ($status === 'failed') {
             if ((int) ($p['translation_failed_at'] ?? 0) <= 0) {
                 // Backoff-klok starten (alsof zojuist gefaald); deze request nog niet opnieuw sturen.
-                fm_mark_translation_failed($id);
+                fm_start_failed_clock($id);
                 continue;
             }
             if (fm_translation_failed_ready($p)) {
@@ -329,4 +338,82 @@ function fm_pick_translation(array $post, array $translations, string $lang): ?s
     $text = $translations[$lang];
 
     return trim($text) !== '' && $text !== (string) $post['body'] ? $text : null;
+}
+
+/** Na zoveel mislukte pogingen verdwijnt het label 'Vertaling volgt' (de dagelijkse retry loopt door). */
+const FM_TRANSLATE_LABEL_MAX_ATTEMPTS = 4;
+
+/**
+ * Label 'Vertaling volgt' tonen? Alleen met actieve config, zonder vertaling voor $lang, als de
+ * bevestigde brontaal niet $lang is, het bericht nog niet klaar is (done zonder deze taal komt niet meer)
+ * en de pogingen niet op zijn. Onbekende bron => label tot de status bekend is.
+ */
+function fm_translation_label_needed(array $post, array $translations, string $lang): bool
+{
+    if (fm_translate_config() === null || !empty($post['deleted_at']) || trim((string) ($post['body'] ?? '')) === '') {
+        return false;
+    }
+    if ((string) ($post['source_lang'] ?? '') === $lang || isset($translations[$lang])) {
+        return false;
+    }
+    $status = (string) ($post['translation_status'] ?? '');
+    if ($status === 'done') {
+        return false;
+    }
+
+    return !($status === 'failed' && (int) ($post['translation_attempts'] ?? 0) >= FM_TRANSLATE_LABEL_MAX_ATTEMPTS);
+}
+
+/** Ids uit ?ids=1,2,3: positieve, unieke ints, max. 50. */
+function fm_parse_poll_ids(string $raw): array
+{
+    $ids = [];
+    foreach (explode(',', $raw) as $part) {
+        $part = trim($part);
+        if ($part !== '' && ctype_digit($part) && (int) $part > 0) {
+            $ids[(int) $part] = true;
+        }
+        if (count($ids) >= 50) {
+            break;
+        }
+    }
+
+    return array_keys($ids);
+}
+
+/**
+ * Antwoord voor translations.php: per post status + label, en bij een vertaling de gerenderde HTML.
+ * Zet zo nodig (nooit, stale pending, failed na backoff) max. FM_TRANSLATE_PER_REQUEST in de queue;
+ * die draait pas na het antwoord (shutdown + fastcgi_finish_request).
+ *
+ * @return array<int, array{status:string, label:bool, html?:string, lang?:string}>
+ */
+function fm_translation_poll(array $ids, string $lang): array
+{
+    $posts = [];
+    foreach ($ids as $id) {
+        $p = fm_get_post((int) $id);
+        if ($p !== null) {
+            $posts[] = $p;
+        }
+    }
+    $translations = fm_translations_for_posts($posts);
+    fm_queue_translations_on_view($posts, $translations);
+    $attachments = $posts !== [] ? fm_attachments_for_posts(array_column($posts, 'id')) : [];
+    $out = [];
+    foreach ($posts as $p) {
+        $id = (int) $p['id'];
+        $fresh = fm_get_post($id) ?? $p; // status na een eventuele claim
+        $status = (string) ($fresh['translation_status'] ?? '');
+        $row = ['status' => $status === '' ? 'none' : $status, 'label' => fm_translation_label_needed($fresh, $translations[$id] ?? [], $lang)];
+        $text = fm_pick_translation($fresh, $translations[$id] ?? [], $lang);
+        if ($text !== null) {
+            $row['html'] = renderTicketMessageMarkdown($text, 0, $attachments[$id] ?? []);
+            $row['lang'] = FM_LANGUAGES[$lang][1] ?? $lang;
+            $row['label'] = false;
+        }
+        $out[$id] = $row;
+    }
+
+    return $out;
 }

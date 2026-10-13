@@ -93,7 +93,7 @@ if ($error !== '') {
     echo '<p class="flash error">' . h($error) . '</p>';
 }
 echo fm_pagination($page, $pages, $pagerUrl);
-echo '<div class="posts"' . ($anchor > 0 ? ' data-first-unread="p' . $anchor . '"' : '') . '>';
+echo '<div class="posts" data-show-original="' . h(fm_t('show_original')) . '" data-show-translation="' . h(fm_t('show_translation')) . '"' . ($anchor > 0 ? ' data-first-unread="p' . $anchor . '"' : '') . '>';
 foreach ($posts as $post) {
     $postId = (int) $post['id'];
     $deleted = !empty($post['deleted_at']);
@@ -139,7 +139,7 @@ foreach ($posts as $post) {
                 . '<div class="post-body message-md" data-original hidden ' . (isset(FM_LANGUAGES[(string) $post['source_lang']]) ? ' lang="' . h(FM_LANGUAGES[(string) $post['source_lang']][1]) . '"' : '') . '>' . renderTicketMessageMarkdown((string) $post['body'], 0, $attachments) . '</div>'
                 . '<button type="button" class="translate-toggle" data-toggle-original data-alt="' . h(fm_t('show_translation')) . '">' . h(fm_t('show_original')) . '</button>';
         } else {
-            echo '<div class="post-body message-md">' . renderTicketMessageMarkdown((string) $post['body'], 0, $attachments) . '</div>';
+            echo '<div class="post-body message-md" data-body>' . renderTicketMessageMarkdown((string) $post['body'], 0, $attachments) . '</div>';
         }
         $listed = fm_unreferenced_attachments($attachments, (string) $post['body']);
         if ($listed !== []) {
@@ -148,7 +148,10 @@ foreach ($posts as $post) {
     }
     // Voetregel over de volle breedte: links de permalink (#id, ook als post#id te citeren), rechts datum en bewerkt.
     echo '<footer class="post-foot">'
-        . '<a class="post-link" href="' . h(fm_thread_url($threadId, $page, $postId)) . '" title="' . h(fm_t('link_post') . ' (post#' . $postId . ')') . '">#' . $postId . '</a>'
+        . '<span class="post-ref"><a class="post-link" href="' . h(fm_thread_url($threadId, $page, $postId)) . '" title="' . h(fm_t('link_post') . ' (post#' . $postId . ')') . '">#' . $postId . '</a>'
+        . (!$deleted && $editId !== $postId && fm_translation_label_needed($post, $translationsByPost[$postId] ?? [], fm_lang())
+            ? ' <span class="translation-pending" data-translation-pending="' . $postId . '">' . h(fm_t('translation_pending')) . '</span>' : '')
+        . '</span>'
         . '<span class="post-when"><time datetime="' . h(gmdate('c', (int) $post['created_at'])) . '">' . h(fm_format_time((int) $post['created_at'])) . '</time>'
         . (!empty($post['edited_at']) && !$deleted ? ' <span class="edited">(' . h(fm_t('edited', fm_format_time((int) $post['edited_at']))) . ')</span>' : '')
         . '</span></footer>';

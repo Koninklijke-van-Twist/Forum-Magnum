@@ -125,7 +125,7 @@ check(str_contains($body, '<strong>allen</strong>') && str_contains($body, 'ascl
 check(str_contains($body, '<span class="company-logo is-admin" role="img" aria-label="Koninklijke van Twist · Beheerder"') && str_contains($body, 'mask-image:url(&quot;assets/company/kvt.svg?v='), 'beheerder: gouden bedrijfslogo in posterblok');
 check(str_contains($body, '<div class="poster-top"><span class="company-logo-wrap is-admin"><span class="company-logo') && str_contains($body, '<img class="poster-avatar" src="avatar.php?'), 'logo linksboven, avatar ernaast');
 check(!str_contains($body, 'post-head') && !str_contains($body, 'admin-badge'), 'geen berichtkop en geen oude ster meer');
-check(preg_match('/<footer class="post-foot"><a class="post-link" href="thread\.php\?id=\d+[^"]*#p(\d+)"[^>]*>#\1<\/a><span class="post-when"><time datetime="[^"]+">[^<]+<\/time><\/span><\/footer>/', $body) === 1, 'voetregel: #id-permalink links, datum rechts');
+check(preg_match('/<footer class="post-foot"><span class="post-ref"><a class="post-link" href="thread\.php\?id=\d+[^"]*#p(\d+)"[^>]*>#\1<\/a><\/span><span class="post-when"><time datetime="[^"]+">[^<]+<\/time><\/span><\/footer>/', $body) === 1, 'voetregel: #id-permalink links, datum rechts');
 check(str_contains($body, 'class="poster" style="--poster-bg:hsl('), 'posterblok met afdelingskleur');
 check(str_contains($body, 'tfalken@kvt.nl') && str_contains($body, 'Koninklijke van Twist'), 'e-mail en bedrijf in posterblok');
 preg_match('/id="p(\d+)"/', $body, $m);

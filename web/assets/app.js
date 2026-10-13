@@ -279,3 +279,63 @@ document.addEventListener('click', function (e) {
     b.textContent = b.getAttribute('data-alt');
     b.setAttribute('data-alt', label);
 });
+// 'Vertaling volgt': zolang de pagina zichtbaar openstaat de eigen server vragen (5, 10, 20 … 60 s, max. ~15 min).
+(function () {
+    var list = document.querySelector('.posts');
+    if (!list || !document.querySelector('[data-translation-pending]')) { return; }
+    var delays = [5000, 10000, 20000, 40000, 60000], step = 0, started = Date.now(), timer = null, busy = false;
+    function pendingIds() {
+        return Array.prototype.map.call(document.querySelectorAll('[data-translation-pending]'), function (el) { return el.getAttribute('data-translation-pending'); });
+    }
+    function apply(id, info) {
+        var label = document.querySelector('[data-translation-pending="' + id + '"]');
+        var post = document.getElementById('p' + id);
+        if (info.html && post) {
+            var body = post.querySelector('[data-body]');
+            if (body) {
+                var tr = document.createElement('div');
+                tr.className = 'post-body message-md';
+                tr.setAttribute('data-translated', '');
+                if (info.lang) { tr.setAttribute('lang', info.lang); }
+                tr.innerHTML = info.html;
+                body.removeAttribute('data-body');
+                body.setAttribute('data-original', '');
+                body.hidden = true;
+                body.parentNode.insertBefore(tr, body);
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'translate-toggle';
+                btn.setAttribute('data-toggle-original', '');
+                btn.setAttribute('data-alt', list.getAttribute('data-show-translation') || '');
+                btn.textContent = list.getAttribute('data-show-original') || '';
+                body.parentNode.insertBefore(btn, body.nextSibling);
+            }
+        }
+        if (label && (info.html || !info.label)) { label.remove(); }
+    }
+    function schedule() {
+        clearTimeout(timer);
+        timer = null;
+        if (document.hidden || !pendingIds().length || Date.now() - started > 15 * 60000) { return; }
+        timer = setTimeout(poll, delays[Math.min(step, delays.length - 1)]);
+        step++;
+    }
+    function poll() {
+        timer = null;
+        var ids = pendingIds();
+        if (!ids.length || busy) { return; }
+        busy = true;
+        fetch('translations.php?ids=' + ids.join(','), { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                var posts = (data && data.posts) || {};
+                ids.forEach(function (id) { if (posts[id]) { apply(id, posts[id]); } else { apply(id, { label: false }); } });
+            })
+            .catch(function () {})
+            .then(function () { busy = false; schedule(); });
+    }
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) { clearTimeout(timer); timer = null; } else if (!timer && !busy) { schedule(); }
+    });
+    schedule();
+})();

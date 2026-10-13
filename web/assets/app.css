@@ -228,3 +228,4 @@ form.inline { display: inline; }
 .post-body[hidden] { display: none; }
 .translate-toggle { border: 0; background: none; padding: 0; margin: 4px 0 0; font: inherit; font-size: .8rem; color: var(--muted); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .translate-toggle:hover { color: var(--text); }
+.translation-pending { margin-left: 6px; font-size: .72rem; color: var(--muted); opacity: .8; font-style: italic; }
