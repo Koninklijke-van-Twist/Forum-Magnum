@@ -20,7 +20,7 @@ const FM_THREADS_PER_PAGE = 20;
 const FM_HOME_PER_PAGE = ['announcements' => 5, 'work' => 10, 'general' => 10];
 const FM_POSTS_PER_PAGE = 50;
 /** Schemaversie in PRAGMA user_version; verhogen bij elke schemawijziging. */
-const FM_SCHEMA_VERSION = 7;
+const FM_SCHEMA_VERSION = 8;
 
 function fm_data_dir(): string
 {
@@ -192,6 +192,11 @@ function fm_migrate(PDO $pdo): void
             if (!in_array('translation_error', $cols, true)) {
                 $pdo->exec("ALTER TABLE posts ADD COLUMN translation_error TEXT NOT NULL DEFAULT ''");
             }
+        }
+        if ($version < 8) {
+            // Eenmalig: failed-posts (flow-timeout door te korte curl-timeout) direct opnieuw laten proberen.
+            $pdo->exec("UPDATE posts SET translation_status = '', translation_failed_at = 0, translation_attempts = 0, translation_requested_at = 0
+                WHERE translation_status = 'failed'");
         }
         $pdo->exec('PRAGMA user_version = ' . FM_SCHEMA_VERSION);
         $pdo->exec('COMMIT');

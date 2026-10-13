@@ -92,7 +92,7 @@ BRONTEKST:
 2. **Status Code**: `200`. **Headers**: `Content-Type` = `application/json`.
 3. **Body**: kies dynamische inhoud **Text** van *Run a prompt* (het antwoord van de prompt).
 
-Het forum wacht (nadat de gebruiker zijn pagina al heeft gekregen) maximaal 90 seconden op dit antwoord.
+Het forum wacht (nadat de gebruiker zijn pagina al heeft gekregen) maximaal 300 seconden (syncTimeout; serverlimieten max_execution_time en request_terminate_timeout moeten ≥ 330 s zijn) op dit antwoord.
 
 ## Stap 4b: asynchroon via callback (optioneel, robuuster bij trage prompts)
 

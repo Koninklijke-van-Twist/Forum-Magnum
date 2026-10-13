@@ -26,7 +26,13 @@ require_once __DIR__ . '/CoPilotTranslate.php';
 const FM_TRANSLATE_STALE_SECONDS = 300;
 
 /** Max. posts per request synchroon verwerken (≈ N × syncTimeout binnen set_time_limit). */
-const FM_TRANSLATE_PER_REQUEST = 2;
+const FM_TRANSLATE_PER_REQUEST = 1;
+
+/** Standaard wachttijd (s) op de synchrone flow-Response; instelbaar via syncTimeout. */
+const FM_TRANSLATE_SYNC_TIMEOUT = 300;
+
+/** PHP-tijdslimiet per vertaling na het antwoord (syncTimeout + marge). */
+const FM_TRANSLATE_TIME_LIMIT = 330;
 
 /** Backoff na mislukte poging n (1-based): 10 min, 1 u, 6 u; daarna 1 dag. */
 const FM_TRANSLATE_BACKOFF = [600, 3600, 21600];
@@ -165,10 +171,12 @@ function fm_run_translation_queue(): void
     }
     $finished = fm_finish_response();
     if ($finished) {
-        // Tot ~FM_TRANSLATE_PER_REQUEST × syncTimeout (90 s) + marge.
-        @set_time_limit(200);
+        @set_time_limit(FM_TRANSLATE_TIME_LIMIT);
     }
     foreach ($ids as $id) {
+        if ($finished) {
+            @set_time_limit(FM_TRANSLATE_TIME_LIMIT); // per post opnieuw: syncTimeout (300 s) + marge
+        }
         try {
             // Altijd volle sync-wachttijd na finish; zonder finish kort (CLI/tests/geen FPM).
             fm_translate_post((int) $id, $finished ? null : 1.5);
@@ -214,6 +222,14 @@ function fm_finish_response(): bool
     return true;
 }
 
+/** Wachttijd voor de flow: expliciete $timeout, anders syncTimeout (default 300 s, max. 600). */
+function fm_translate_sync_timeout(array $config, ?float $timeout = null): float
+{
+    $t = $timeout ?? (is_numeric($config['syncTimeout'] ?? null) ? (float) $config['syncTimeout'] : (float) FM_TRANSLATE_SYNC_TIMEOUT);
+
+    return max(1.0, min(600.0, $t));
+}
+
 /** Laatste vertaalfout vastleggen (diagnose) en naar error_log. */
 function fm_translation_error(int $postId, string $message): void
 {
@@ -256,7 +272,7 @@ function fm_translate_post(int $postId, ?float $timeout = null): void
     $claimedAt = time();
     fm_claim_translation($postId, 'any', $claimedAt);
     $result = cpt_send($config, (string) $postId, $body, $hint !== '' ? $hint : null, $callbackUrl, $token,
-        min(110.0, $timeout ?? (float) ($config['syncTimeout'] ?? 90)), $status, $error);
+        fm_translate_sync_timeout($config, $timeout), $status, $error);
     if ($result !== null) {
         if (fm_store_translations($postId, $hash, $result['translations'], $result['source'])) {
             fm_db()->prepare("UPDATE posts SET translation_error = '' WHERE id = ?")->execute([$postId]);
