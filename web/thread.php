@@ -112,6 +112,8 @@ foreach ($posts as $post) {
         . '<div class="post-main">';
     // Menu op elk bericht: 'Kopieer link' voor iedereen (ook verwijderd), bewerken/verwijderen alleen waar toegestaan.
     echo '<details class="post-menu"><summary title="' . h(fm_t('menu')) . '" aria-label="' . h(fm_t('menu')) . '">⋯</summary><div class="post-menu-list">'
+        . (!$deleted && $editId !== $postId && fm_pick_translation($post, $translationsByPost[$postId] ?? [], fm_lang()) !== null
+            ? '<button type="button" data-toggle-original data-alt="' . h(fm_t('show_translation')) . '">' . h(fm_t('show_original')) . '</button>' : '')
         . '<button type="button" data-copy-link="' . h('post.php?id=' . $postId) . '" data-copied="' . h(fm_t('link_copied')) . '">' . h(fm_t('copy_link')) . '</button>';
     if ($canEdit && $editId !== $postId) {
         echo '<a href="' . h('thread.php?' . http_build_query(['id' => $threadId, 'p' => $page, 'edit' => $postId]) . '#p' . $postId) . '">' . h(fm_t('edit')) . '</a>';
@@ -150,7 +152,7 @@ foreach ($posts as $post) {
             // Vertaling standaard; origineel ernaast verborgen, met een klein wisselknopje.
             echo '<div class="post-body message-md" data-translated lang="' . h(FM_LANGUAGES[fm_lang()][1]) . '">' . renderTicketMessageMarkdown($translated, 0, $attachments) . '</div>'
                 . '<div class="post-body message-md" data-original hidden ' . (isset(FM_LANGUAGES[(string) $post['source_lang']]) ? ' lang="' . h(FM_LANGUAGES[(string) $post['source_lang']][1]) . '"' : '') . '>' . renderTicketMessageMarkdown((string) $post['body'], 0, $attachments) . '</div>'
-                . '<button type="button" class="translate-toggle" data-toggle-original data-alt="' . h(fm_t('show_translation')) . '">' . h(fm_t('show_original')) . '</button>';
+;
         } else {
             echo '<div class="post-body message-md" data-body>' . renderTicketMessageMarkdown((string) $post['body'], 0, $attachments) . '</div>';
         }
