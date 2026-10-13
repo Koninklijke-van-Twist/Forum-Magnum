@@ -70,19 +70,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     }
 }
 
-$total = fm_count_posts($threadId);
-$pages = fm_page_count($total, FM_POSTS_PER_PAGE);
-$anchor = 0;
-if (isset($_GET['p'])) {
-    $page = max(1, min($pages, (int) $_GET['p']));
-    $firstUnread = fm_first_unread_post_id($threadId, $fmUser);
-    if ($firstUnread > 0 && fm_page_of_post($threadId, $firstUnread) === $page) {
-        $anchor = $firstUnread;
-    }
-} else {
-    [$page, $anchor] = fm_resolve_open_page($threadId, $fmUser);
-}
-$posts = fm_list_posts($threadId, $page);
+// Cursor (version) samen met paginering en postlijst: niet ná fm_list_posts opnieuw de versie lezen.
+$view = fm_thread_page($threadId, $fmUser, isset($_GET['p']) ? (int) $_GET['p'] : null);
+$pages = $view['pages'];
+$page = $view['page'];
+$anchor = $view['anchor'];
+$posts = $view['posts'];
+$liveSince = $view['version'];
 $firstPostId = fm_first_post_id($threadId);
 $editId = (int) ($_GET['edit'] ?? 0);
 $attachmentsByPost = fm_attachments_for_posts(array_column($posts, 'id'));
@@ -100,7 +94,7 @@ if ($error !== '') {
     echo '<p class="flash error">' . h($error) . '</p>';
 }
 echo fm_pagination($page, $pages, $pagerUrl);
-echo '<div class="posts" data-thread="' . $threadId . '" data-page="' . $page . '" data-since="' . fm_thread_version($threadId) . '"'
+echo '<div class="posts" data-thread="' . $threadId . '" data-page="' . $page . '" data-since="' . $liveSince . '"'
     . ' data-new-posts="' . h(fm_t('new_posts')) . '" data-changed-editing="' . h(fm_t('post_changed_while_editing')) . '"'
     . ' data-last-url="' . h(fm_thread_url($threadId, $pages)) . '" data-show-original="' . h(fm_t('show_original')) . '" data-show-translation="' . h(fm_t('show_translation')) . '"' . ($anchor > 0 ? ' data-first-unread="p' . $anchor . '"' : '') . '>';
 $renderCtx = ['thread' => $thread, 'page' => $page, 'firstPostId' => $firstPostId, 'editId' => $editId, 'editDraft' => $editDraft,
