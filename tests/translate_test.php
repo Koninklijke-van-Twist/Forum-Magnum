@@ -76,12 +76,23 @@ $GLOBALS['copilotTranslate'] = ['flowUrl' => 'https://example.invalid/flow', 'ca
 unset($GLOBALS['fmTranslateQueue']);
 fm_queue_untranslated_posts([fm_get_post($lazyId)], []);
 check(isset($GLOBALS['fmTranslateQueue'][$lazyId]), 'lazy: met config in wachtrij');
-check_same('pending', fm_get_post($lazyId)['translation_status'], 'lazy: status pending als claim');
-// Tweede call mag niet opnieuw queueën (al pending)
+$lazyAfter = fm_get_post($lazyId);
+check_same('pending', $lazyAfter['translation_status'], 'lazy: status pending als claim');
+check((int) $lazyAfter['translation_requested_at'] > 0, 'lazy: translation_requested_at gezet');
+// Tweede call mag niet opnieuw queueën (verse pending)
 $qBefore = $GLOBALS['fmTranslateQueue'];
 fm_queue_untranslated_posts([fm_get_post($lazyId)], []);
-check_same($qBefore, $GLOBALS['fmTranslateQueue'], 'lazy: pending niet opnieuw');
+check_same($qBefore, $GLOBALS['fmTranslateQueue'], 'lazy: verse pending niet opnieuw');
 $GLOBALS['fmTranslateQueue'] = []; // shutdown niet echt naar de flow laten gaan
+
+// Stale pending (>5 min) mag opnieuw geclaimd worden
+fm_db()->prepare('UPDATE posts SET translation_status = ?, translation_requested_at = ? WHERE id = ?')
+    ->execute(['pending', time() - FM_TRANSLATE_STALE_SECONDS - 10, $lazyId]);
+unset($GLOBALS['fmTranslateQueue']);
+fm_queue_untranslated_posts([fm_get_post($lazyId)], []);
+check(isset($GLOBALS['fmTranslateQueue'][$lazyId]), 'lazy: stale pending opnieuw in wachtrij');
+check((int) fm_get_post($lazyId)['translation_requested_at'] >= time() - 2, 'lazy: stale claim vernieuwt tijdstip');
+$GLOBALS['fmTranslateQueue'] = [];
 
 // Limiet 5 nieuwe + mislukte blijven via aparte retry (3)
 $ids = [];
@@ -113,6 +124,16 @@ $tr = fm_translations_for_posts([fm_get_post($doneId)]);
 fm_queue_untranslated_posts([fm_get_post($doneId)], $tr);
 check(!isset($GLOBALS['fmTranslateQueue'][$doneId]), 'lazy: met vertalingen niet in wachtrij');
 check_same('', fm_get_post($doneId)['translation_status'], 'lazy: met vertalingen status niet geclaimd');
+
+// Retry: failed + stale pending
+$tFail = fm_create_thread('general', 'jan@kvt.nl', 'Fail', 'Mislukt bericht');
+$failId = fm_first_post_id($tFail);
+fm_db()->prepare("UPDATE posts SET translation_status = 'failed', translation_requested_at = 0 WHERE id = ?")->execute([$failId]);
+unset($GLOBALS['fmTranslateQueue']);
+fm_retry_failed_translations([fm_get_post($failId)], 3);
+check(isset($GLOBALS['fmTranslateQueue'][$failId]), 'retry: failed in wachtrij');
+check_same('pending', fm_get_post($failId)['translation_status'], 'retry: failed geclaimd als pending');
+$GLOBALS['fmTranslateQueue'] = [];
 
 $GLOBALS['copilotTranslate'] = null;
 

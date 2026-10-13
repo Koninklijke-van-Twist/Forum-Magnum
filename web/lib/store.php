@@ -20,7 +20,7 @@ const FM_THREADS_PER_PAGE = 20;
 const FM_HOME_PER_PAGE = ['announcements' => 5, 'work' => 10, 'general' => 10];
 const FM_POSTS_PER_PAGE = 50;
 /** Schemaversie in PRAGMA user_version; verhogen bij elke schemawijziging. */
-const FM_SCHEMA_VERSION = 4;
+const FM_SCHEMA_VERSION = 5;
 
 function fm_data_dir(): string
 {
@@ -168,6 +168,13 @@ function fm_migrate(PDO $pdo): void
                 updated_at INTEGER NOT NULL,
                 PRIMARY KEY (post_id, lang)
             )');
+        }
+        if ($version < 5) {
+            // Tijdstip van pending-claim: stale pending (>~5 min) mag opnieuw gequeued worden.
+            $cols = array_column($pdo->query('PRAGMA table_info(posts)')->fetchAll(), 'name');
+            if (!in_array('translation_requested_at', $cols, true)) {
+                $pdo->exec('ALTER TABLE posts ADD COLUMN translation_requested_at INTEGER NOT NULL DEFAULT 0');
+            }
         }
         $pdo->exec('PRAGMA user_version = ' . FM_SCHEMA_VERSION);
         $pdo->exec('COMMIT');
@@ -407,7 +414,7 @@ function fm_delete_post(int $postId, string $email): void
         fm_detach_files($pdo, $postId);
         $pdo->prepare('DELETE FROM mentions WHERE post_id = ?')->execute([$postId]);
         $pdo->prepare('DELETE FROM post_translations WHERE post_id = ?')->execute([$postId]);
-        $pdo->prepare("UPDATE posts SET translation_status = '' WHERE id = ?")->execute([$postId]);
+        $pdo->prepare("UPDATE posts SET translation_status = '', translation_requested_at = 0 WHERE id = ?")->execute([$postId]);
         fm_refresh_thread_meta((int) $post['thread_id']);
     });
 }
