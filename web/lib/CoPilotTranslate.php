@@ -56,8 +56,9 @@ function cpt_verify_token(string $secret, string $id, string $version, string $t
  * antwoordt (['source' => ?string, 'translations' => [lang => text]]), anders null.
  * Gooit nooit: fouten/timeouts geven null (posten mag hier nooit op stuklopen).
  */
-function cpt_send(array $config, string $id, string $text, ?string $sourceHint, string $callbackUrl, string $callbackToken, ?float $timeout = null): ?array
+function cpt_send(array $config, string $id, string $text, ?string $sourceHint, string $callbackUrl, string $callbackToken, ?float $timeout = null, ?int &$httpStatus = null): ?array
 {
+    $httpStatus = 0;
     if (!cpt_enabled($config) || !function_exists('curl_init')) {
         return null;
     }
@@ -80,6 +81,7 @@ function cpt_send(array $config, string $id, string $text, ?string $sourceHint, 
     $body = curl_exec($ch);
     $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
     curl_close($ch);
+    $httpStatus = $status; // 0 = timeout/verbindingsfout
     if (!is_string($body) || $body === '' || $status < 200 || $status >= 300) {
         return null; // 202 zonder body = asynchroon; callback volgt.
     }

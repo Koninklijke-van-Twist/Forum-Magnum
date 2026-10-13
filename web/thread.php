@@ -79,6 +79,7 @@ $firstPostId = fm_first_post_id($threadId);
 $editId = (int) ($_GET['edit'] ?? 0);
 $attachmentsByPost = fm_attachments_for_posts(array_column($posts, 'id'));
 $translationsByPost = fm_translations_for_posts($posts);
+fm_retry_failed_translations($posts);
 $lastReadBefore = fm_last_read($threadId, $fmUser);
 if ($posts !== []) {
     fm_mark_read($threadId, $fmUser, (int) end($posts)['id']);
@@ -135,7 +136,7 @@ foreach ($posts as $post) {
         if ($translated !== null) {
             // Vertaling standaard; origineel ernaast verborgen, met een klein wisselknopje.
             echo '<div class="post-body message-md" data-translated lang="' . h(FM_LANGUAGES[fm_lang()][1]) . '">' . renderTicketMessageMarkdown($translated, 0, $attachments) . '</div>'
-                . '<div class="post-body message-md" data-original hidden lang="' . h(FM_LANGUAGES[(string) $post['source_lang']][1] ?? '') . '">' . renderTicketMessageMarkdown((string) $post['body'], 0, $attachments) . '</div>'
+                . '<div class="post-body message-md" data-original hidden ' . (isset(FM_LANGUAGES[(string) $post['source_lang']]) ? ' lang="' . h(FM_LANGUAGES[(string) $post['source_lang']][1]) . '"' : '') . '>' . renderTicketMessageMarkdown((string) $post['body'], 0, $attachments) . '</div>'
                 . '<button type="button" class="translate-toggle" data-toggle-original data-alt="' . h(fm_t('show_translation')) . '">' . h(fm_t('show_original')) . '</button>';
         } else {
             echo '<div class="post-body message-md">' . renderTicketMessageMarkdown((string) $post['body'], 0, $attachments) . '</div>';

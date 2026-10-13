@@ -310,9 +310,8 @@ function fm_create_thread(string $section, string $email, string $title, string 
 
 function fm_insert_post(PDO $pdo, int $threadId, string $email, string $body, int $now): int
 {
-    // Brontaal voorlopig = taalkeuze van de auteur; de vertaalflow kan die corrigeren.
-    $pdo->prepare('INSERT INTO posts (thread_id, author, body, created_at, source_lang) VALUES (?,?,?,?,?)')
-        ->execute([$threadId, $email, $body, $now, fm_get_lang($email) ?: 'nl']);
+    $pdo->prepare('INSERT INTO posts (thread_id, author, body, created_at) VALUES (?,?,?,?)')
+        ->execute([$threadId, $email, $body, $now]);
     $postId = (int) $pdo->lastInsertId();
     fm_sync_mentions($pdo, $postId, $body, $email);
     $pdo->prepare('UPDATE threads SET last_post_at = ?, last_post_id = ?, last_author = ?, post_count = post_count + 1 WHERE id = ?')

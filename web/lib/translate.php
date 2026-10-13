@@ -5,7 +5,8 @@ declare(strict_types=1);
 /**
  * Forumkoppeling voor automatische vertaling (generieke module: CoPilotTranslate.php).
  *
- * - posts.source_lang: (gedetecteerde) brontaal; eerst de taalkeuze van de auteur als hint.
+ * - posts.source_lang: brontaal zoals gedetecteerd door de flow ('' = nog onbekend); de taalkeuze
+ *   van de auteur gaat alleen als sourceHint mee.
  * - posts.translation_status: '', pending, done, failed (alleen intern, geen UI).
  * - post_translations: per bericht en taal de vertaalde ruwe opmaaktekst + source_hash
  *   (sha256 van de body waarvoor vertaald is). Bewerkt bericht => andere hash => oude callback genegeerd.
@@ -56,6 +57,10 @@ function fm_run_translation_queue(): void
         ignore_user_abort(true);
         $finished = @fastcgi_finish_request();
     }
+    if ($finished) {
+        // Synchrone wachttijd (syncTimeout, standaard 90 s) mag niet tegen max_execution_time aanlopen.
+        @set_time_limit(120);
+    }
     foreach ($ids as $id) {
         try {
             fm_translate_post((int) $id, $finished ? null : 1.5);
@@ -93,12 +98,16 @@ function fm_translate_post(int $postId, ?float $timeout = null): void
     $hash = fm_source_hash($body);
     $token = cpt_make_token((string) $config['callbackSecret'], (string) $postId, $hash);
     $callbackUrl = fm_translate_callback_base($config) . '/translate_callback.php?' . http_build_query(['id' => $postId, 'h' => $hash]);
-    $hint = (string) ($post['source_lang'] ?? '') ?: fm_get_lang((string) $post['author']);
+    $hint = fm_get_lang((string) $post['author']);
     fm_db()->prepare("UPDATE posts SET translation_status = 'pending' WHERE id = ?")->execute([$postId]);
     $result = cpt_send($config, (string) $postId, $body, $hint !== '' ? $hint : null, $callbackUrl, $token,
-        $timeout ?? (float) ($config['syncTimeout'] ?? 90));
+        min(110.0, $timeout ?? (float) ($config['syncTimeout'] ?? 90)), $status);
     if ($result !== null) {
         fm_store_translations($postId, $hash, $result['translations'], $result['source']);
+    } elseif ($status < 200 || $status >= 300) {
+        // Timeout of fout: 'failed', een latere weergave probeert het opnieuw (fm_retry_failed_translations).
+        // 2xx zonder bruikbare body = asynchroon geaccepteerd; blijft 'pending' tot de callback.
+        fm_db()->prepare("UPDATE posts SET translation_status = 'failed' WHERE id = ? AND translation_status = 'pending'")->execute([$postId]);
     }
 }
 
@@ -152,11 +161,26 @@ function fm_translations_for_posts(array $posts): array
     return $out;
 }
 
+/** Mislukte vertalingen van de getoonde berichten opnieuw in de wachtrij (max. $limit per request). */
+function fm_retry_failed_translations(array $posts, int $limit = 3): void
+{
+    foreach ($posts as $p) {
+        if ($limit <= 0) {
+            return;
+        }
+        if (($p['translation_status'] ?? '') === 'failed' && empty($p['deleted_at'])) {
+            fm_queue_translation((int) $p['id']);
+            $limit--;
+        }
+    }
+}
+
 /** Vertaalde tekst voor de lezer, of null (zelfde taal als bron, of nog geen vertaling). */
 function fm_pick_translation(array $post, array $translations, string $lang): ?string
 {
+    // source_lang wordt alleen door de flow gezet; alleen een bevestigde brontaal = lezerstaal toont het origineel.
     $source = (string) ($post['source_lang'] ?? '');
-    if ($source === '' || $source === $lang || !isset($translations[$lang])) {
+    if ($source === $lang || !isset($translations[$lang])) {
         return null;
     }
     $text = $translations[$lang];
