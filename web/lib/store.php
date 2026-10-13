@@ -20,7 +20,7 @@ const FM_THREADS_PER_PAGE = 20;
 const FM_HOME_PER_PAGE = ['announcements' => 5, 'work' => 10, 'general' => 10];
 const FM_POSTS_PER_PAGE = 50;
 /** Schemaversie in PRAGMA user_version; verhogen bij elke schemawijziging. */
-const FM_SCHEMA_VERSION = 6;
+const FM_SCHEMA_VERSION = 7;
 
 function fm_data_dir(): string
 {
@@ -184,6 +184,13 @@ function fm_migrate(PDO $pdo): void
             }
             if (!in_array('translation_attempts', $cols, true)) {
                 $pdo->exec('ALTER TABLE posts ADD COLUMN translation_attempts INTEGER NOT NULL DEFAULT 0');
+            }
+        }
+        if ($version < 7) {
+            // Laatste vertaalfout (diagnose voor beheerders).
+            $cols = array_column($pdo->query('PRAGMA table_info(posts)')->fetchAll(), 'name');
+            if (!in_array('translation_error', $cols, true)) {
+                $pdo->exec("ALTER TABLE posts ADD COLUMN translation_error TEXT NOT NULL DEFAULT ''");
             }
         }
         $pdo->exec('PRAGMA user_version = ' . FM_SCHEMA_VERSION);

@@ -56,10 +56,13 @@ function cpt_verify_token(string $secret, string $id, string $version, string $t
  * antwoordt (['source' => ?string, 'translations' => [lang => text]]), anders null.
  * Gooit nooit: fouten/timeouts geven null (posten mag hier nooit op stuklopen).
  */
-function cpt_send(array $config, string $id, string $text, ?string $sourceHint, string $callbackUrl, string $callbackToken, ?float $timeout = null, ?int &$httpStatus = null): ?array
+function cpt_send(array $config, string $id, string $text, ?string $sourceHint, string $callbackUrl, string $callbackToken, ?float $timeout = null, ?int &$httpStatus = null, ?string &$error = null): ?array
 {
     $httpStatus = 0;
+    $error = null;
     if (!cpt_enabled($config) || !function_exists('curl_init')) {
+        $error = 'config/curl ontbreekt';
+
         return null;
     }
     $languages = cpt_languages($config);
@@ -80,13 +83,23 @@ function cpt_send(array $config, string $id, string $text, ?string $sourceHint, 
     ]);
     $body = curl_exec($ch);
     $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    $curlError = curl_error($ch);
     curl_close($ch);
     $httpStatus = $status; // 0 = timeout/verbindingsfout
-    if (!is_string($body) || $body === '' || $status < 200 || $status >= 300) {
-        return null; // 202 zonder body = asynchroon; callback volgt.
+    if ($status < 200 || $status >= 300) {
+        $error = $status === 0 ? 'cURL: ' . ($curlError !== '' ? $curlError : 'timeout') : 'HTTP ' . $status . ': ' . substr(is_string($body) ? $body : '', 0, 200);
+
+        return null;
+    }
+    if (!is_string($body) || trim($body) === '') {
+        return null; // 2xx (bv. 202) zonder body = asynchroon; callback volgt.
+    }
+    $parsed = cpt_parse_translations($body, $languages);
+    if ($parsed === null) {
+        $error = 'HTTP ' . $status . ' onleesbaar antwoord: ' . substr($body, 0, 200);
     }
 
-    return cpt_parse_translations($body, $languages);
+    return $parsed;
 }
 
 /**

@@ -56,6 +56,7 @@ try {
     }
     $result = cpt_parse_translations($raw, cpt_languages($config));
     if ($result === null) {
+        fm_translation_error($postId, 'callback onleesbaar: ' . substr($raw, 0, 200));
         fm_mark_translation_failed($postId);
         fm_cb_reply(422, ['ok' => false, 'error' => 'unparseable']);
     }
@@ -64,6 +65,7 @@ try {
         fm_cb_reply(200, ['ok' => true, 'stored' => false, 'reason' => 'stale']);
     }
     fm_cb_reply(200, ['ok' => true, 'stored' => true, 'source' => $result['source']]);
-} catch (Throwable) {
+} catch (Throwable $e) {
+    error_log('[forum-magnum] translate_callback: ' . $e->getMessage());
     fm_cb_reply(500, ['ok' => false, 'error' => 'server']);
 }

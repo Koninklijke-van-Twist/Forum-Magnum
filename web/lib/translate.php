@@ -163,15 +163,7 @@ function fm_run_translation_queue(): void
     if ($ids === []) {
         return;
     }
-    $finished = false;
-    if (function_exists('fastcgi_finish_request')) {
-        // Antwoord (redirect) gaat nu al naar de browser; daarna mogen we op de flow wachten.
-        if (session_status() === PHP_SESSION_ACTIVE) {
-            session_write_close();
-        }
-        ignore_user_abort(true);
-        $finished = @fastcgi_finish_request();
-    }
+    $finished = fm_finish_response();
     if ($finished) {
         // Tot ~FM_TRANSLATE_PER_REQUEST × syncTimeout (90 s) + marge.
         @set_time_limit(200);
@@ -180,12 +172,55 @@ function fm_run_translation_queue(): void
         try {
             // Altijd volle sync-wachttijd na finish; zonder finish kort (CLI/tests/geen FPM).
             fm_translate_post((int) $id, $finished ? null : 1.5);
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            fm_translation_error((int) $id, 'exception: ' . $e->getMessage());
             try {
                 fm_mark_translation_failed((int) $id);
             } catch (Throwable) {
             }
         }
+    }
+}
+
+/**
+ * Stuur het antwoord nu naar de browser zodat we daarna op de flow kunnen wachten.
+ * PHP-FPM: fastcgi_finish_request. Apache mod_php (geen FPM): Content-Length + Connection: close
+ * en buffers flushen. CLI/tests: false (dan alleen een korte poging).
+ */
+function fm_finish_response(): bool
+{
+    if (PHP_SAPI === 'cli' || PHP_SAPI === 'phpdbg') {
+        return false;
+    }
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+    ignore_user_abort(true);
+    if (function_exists('fastcgi_finish_request')) {
+        return (bool) @fastcgi_finish_request();
+    }
+    $out = '';
+    while (ob_get_level() > 0) {
+        $out = (string) ob_get_clean() . $out;
+    }
+    if (!headers_sent()) {
+        header('Connection: close');
+        header('Content-Encoding: none');
+        header('Content-Length: ' . strlen($out));
+    }
+    echo $out;
+    @flush();
+
+    return true;
+}
+
+/** Laatste vertaalfout vastleggen (diagnose) en naar error_log. */
+function fm_translation_error(int $postId, string $message): void
+{
+    error_log('[forum-magnum] vertaling post ' . $postId . ': ' . $message);
+    try {
+        fm_db()->prepare('UPDATE posts SET translation_error = ? WHERE id = ?')->execute([mb_substr($message, 0, 300), $postId]);
+    } catch (Throwable) {
     }
 }
 
@@ -221,10 +256,13 @@ function fm_translate_post(int $postId, ?float $timeout = null): void
     $claimedAt = time();
     fm_claim_translation($postId, 'any', $claimedAt);
     $result = cpt_send($config, (string) $postId, $body, $hint !== '' ? $hint : null, $callbackUrl, $token,
-        min(110.0, $timeout ?? (float) ($config['syncTimeout'] ?? 90)), $status);
+        min(110.0, $timeout ?? (float) ($config['syncTimeout'] ?? 90)), $status, $error);
     if ($result !== null) {
-        fm_store_translations($postId, $hash, $result['translations'], $result['source']);
-    } elseif ($status < 200 || $status >= 300) {
+        if (fm_store_translations($postId, $hash, $result['translations'], $result['source'])) {
+            fm_db()->prepare("UPDATE posts SET translation_error = '' WHERE id = ?")->execute([$postId]);
+        }
+    } elseif ($error !== null) {
+        fm_translation_error($postId, $error);
         // Timeout of cURL/HTTP-fout: failed + attempts; backoff bepaalt de volgende poging.
         // 2xx zonder bruikbare body = asynchroon geaccepteerd; blijft pending tot callback of stale.
         fm_mark_translation_failed($postId, $claimedAt);
