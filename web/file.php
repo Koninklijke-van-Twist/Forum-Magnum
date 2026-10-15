@@ -14,7 +14,7 @@ if ($path === '' || !is_file($path)) {
     echo fm_t('not_found');
     exit;
 }
-$inline = !empty($_GET['inline']) && fm_is_inline_image($attachment);
+$inlineMime = !empty($_GET['inline']) ? fm_inline_serve_mime($attachment, $path) : null;
 $name = (string) $attachment['original_name'];
 $ascii = preg_replace('/[^A-Za-z0-9._ -]+/', '_', $name) ?: 'bestand';
 
@@ -22,9 +22,14 @@ while (ob_get_level() > 0) {
     ob_end_clean();
 }
 header('X-Content-Type-Options: nosniff');
-header("Content-Security-Policy: default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
-header('Content-Type: ' . ($inline ? (string) $attachment['mime'] : 'application/octet-stream'));
-header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . '; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($name));
+// Downloads blijven sandbox; inline media (plaatje, video, pdf) niet, anders weigert de viewer.
+if ($inlineMime === null) {
+    header("Content-Security-Policy: default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
+} else {
+    header("Content-Security-Policy: default-src 'none'");
+}
+header('Content-Type: ' . ($inlineMime ?? 'application/octet-stream'));
+header('Content-Disposition: ' . ($inlineMime !== null ? 'inline' : 'attachment') . '; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($name));
 header('Content-Length: ' . (string) filesize($path));
 // De inhoud bij een hash verandert nooit.
 header('Cache-Control: private, max-age=86400');

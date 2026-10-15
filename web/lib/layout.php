@@ -29,6 +29,38 @@ function fm_redirect(string $url): never
     exit;
 }
 
+/**
+ * Terug-URL na de taalwissel: alleen eigen pagina's, geen open redirect.
+ * preview.php houdt alleen een numeriek id en eventueel part=1.
+ */
+function fm_safe_return_url(string $back): string
+{
+    if (str_contains($back, '//') || str_contains($back, '\\') || preg_match('/[\x00-\x20\x7f]/', $back) === 1) {
+        return 'index.php';
+    }
+    if (preg_match('~^/?(?:[A-Za-z0-9_./-]*/)?(index|section|new|thread|notifications|preview)\.php(\?[^\s#]*)?$~', $back, $m) !== 1) {
+        return 'index.php';
+    }
+    if ($m[1] !== 'preview') {
+        return $m[1] . '.php' . ($m[2] ?? '');
+    }
+    $query = [];
+    if (($m[2] ?? '') !== '') {
+        parse_str(ltrim($m[2], '?'), $query);
+    }
+    $id = $query['id'] ?? null;
+    if (!is_scalar($id) || preg_match('/^[1-9][0-9]{0,9}$/', (string) $id) !== 1) {
+        return 'index.php';
+    }
+    $url = 'preview.php?id=' . $id;
+    $part = $query['part'] ?? null;
+    if (is_scalar($part) && (string) $part === '1') {
+        $url .= '&part=1';
+    }
+
+    return $url;
+}
+
 function fm_flash(?string $message = null): ?string
 {
     if ($message !== null) {

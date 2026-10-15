@@ -388,8 +388,11 @@ function restoreMessageInlineCodePlaceholders(string $html, array $codes): strin
  */
 function applyMessageInlineEmphasis(string $escapedText): string
 {
+    // **vet** / __vet__ en *schuin* / _schuin_. Underscores niet midden in een woord (snake_case).
     $escapedText = preg_replace('/\*\*(?!\s)([^*\n]+?)(?<!\s)\*\*/', '<strong>$1</strong>', $escapedText) ?? $escapedText;
+    $escapedText = preg_replace('/(?<![\p{L}\p{N}_])__(?!\s)([^_\n]+?)(?<!\s)__(?![\p{L}\p{N}_])/u', '<strong>$1</strong>', $escapedText) ?? $escapedText;
     $escapedText = preg_replace('/(?<!\*)\*(?!\s)([^*\n]+?)(?<!\s)\*(?!\*)/', '<em>$1</em>', $escapedText) ?? $escapedText;
+    $escapedText = preg_replace('/(?<![\p{L}\p{N}_])_(?!\s)([^_\n]+?)(?<!\s)_(?![\p{L}\p{N}_])/u', '<em>$1</em>', $escapedText) ?? $escapedText;
 
     return $escapedText;
 }

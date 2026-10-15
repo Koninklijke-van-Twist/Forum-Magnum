@@ -501,3 +501,85 @@ document.addEventListener('click', function (e) {
     });
     schedule();
 })();
+
+/* Bijlage: klik op miniatuur of naam opent een voorbeeld; Downloaden zit in de modal. */
+(function () {
+    'use strict';
+    var modal = null, opener = null, seq = 0, hljsLoading = null;
+
+    function loadHljs() {
+        if (window.hljs) { return Promise.resolve(); }
+        if (hljsLoading) { return hljsLoading; }
+        hljsLoading = new Promise(function (resolve) {
+            var link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = 'assets/highlight-github-dark.min.css';
+            document.head.appendChild(link);
+            var s = document.createElement('script');
+            s.src = 'assets/highlight.min.js';
+            s.onload = function () { resolve(); };
+            s.onerror = function () { resolve(); };
+            document.head.appendChild(s);
+        });
+        return hljsLoading;
+    }
+    function highlight(root) {
+        var codes = root.querySelectorAll('pre code[class*="language-"]');
+        if (!codes.length) { return; }
+        loadHljs().then(function () {
+            if (!window.hljs) { return; }
+            Array.prototype.forEach.call(codes, function (el) {
+                try { window.hljs.highlightElement(el); } catch (err) { /* onbekende taal: platte tekst blijft staan */ }
+            });
+        });
+    }
+    function cleanup() {
+        if (modal) { modal.remove(); modal = null; }
+        if (opener && opener.focus) { opener.focus(); }
+        opener = null;
+    }
+    function openPreview(anchor) {
+        var id = anchor.getAttribute('data-preview');
+        if (!id) { return; }
+        opener = anchor;
+        var my = ++seq;
+        fetch('preview.php?id=' + encodeURIComponent(id) + '&part=1', { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.text() : ''; })
+            .then(function (html) {
+                if (!html || my !== seq || html.indexOf('class="preview"') === -1) { return; }
+                if (modal) {
+                    modal.removeEventListener('close', cleanup);
+                    modal.close();
+                    modal.remove();
+                    modal = null;
+                }
+                modal = document.createElement('dialog');
+                modal.className = 'preview-modal';
+                modal.innerHTML = html;
+                modal.addEventListener('close', cleanup);
+                modal.addEventListener('click', function (ev) {
+                    if (ev.target === modal) { modal.close(); }
+                });
+                document.body.appendChild(modal);
+                if (typeof modal.showModal === 'function') { modal.showModal(); }
+                highlight(modal);
+            })
+            .catch(function () { if (my === seq) { opener = null; } });
+    }
+    document.addEventListener('click', function (e) {
+        if (modal && e.target.closest('[data-preview-close]')) {
+            e.preventDefault();
+            modal.close();
+            return;
+        }
+        var a = e.target.closest && e.target.closest('[data-preview]');
+        if (!a || (modal && modal.contains(a))) { return; }
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) { return; }
+        e.preventDefault();
+        openPreview(a);
+    });
+    document.addEventListener('DOMContentLoaded', function () {
+        var page = document.querySelector('main > .preview');
+        if (page) { highlight(page); }
+    });
+})();
