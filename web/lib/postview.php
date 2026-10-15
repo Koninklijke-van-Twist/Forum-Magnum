@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/repeating.php';
+
 /**
  * Eén bericht als HTML (gedeeld door thread.php en thread_updates.php): poster-blok, ⋯-menu,
  * body (vertaling in lezerstaal of origineel), bijlagen, voetregel met label.
@@ -83,9 +85,36 @@ function fm_render_post_html(array $post, array $c): string
         }
     }
     // Voetregel over de volle breedte: links de permalink (#id, ook als post#id te citeren), rechts datum en bewerkt.
+    // Herhaalde eindcijfers kleuren de balk (fm_repeating_digits); de tooltip hoort bij het nummer.
     $pollNeeded = !$deleted && $editId !== $postId && fm_translation_poll_needed($post, $translationsByPost[$postId] ?? [], fm_lang());
-    $out .= '<footer class="post-foot">'
-        . '<span class="post-ref"' . ($pollNeeded ? ' data-translation-poll="' . $postId . '"' : '') . '><a class="post-link" href="' . h(fm_thread_url($threadId, $page, $postId)) . '" title="' . h(fm_t('link_post') . ' (post#' . $postId . ')') . '">#' . $postId . '</a>'
+    $gets = fm_repeating_digits($postId);
+    $footClass = 'post-foot';
+    $fx = '';
+    $refExtra = '';
+    $linkAttr = ' title="' . h(fm_t('link_post') . ' (post#' . $postId . ')') . '"';
+    $tip = '';
+    $knownTier = ['dubs' => true, 'trips' => true, 'quads' => true, 'quints' => true, 'rainbow' => true, 'nice' => true];
+    if (isset($knownTier[$gets['tier']])) {
+        $classes = ['has-gets', 'gets-' . $gets['tier']];
+        if (isset(['dubs' => true, 'trips' => true, 'quads' => true, 'quints' => true][$gets['tier']])) {
+            $classes[] = 'gets-shine';
+        }
+        if ($gets['accent'] === 'satanic' || $gets['accent'] === 'holy') {
+            $classes[] = 'gets-' . $gets['accent'];
+        }
+        $footClass .= ' ' . implode(' ', $classes);
+        $refExtra = ' data-gets="' . $gets['tier'] . '"';
+        // Geen title: die zou een tweede, tragere browser-tooltip over de onze leggen.
+        $linkAttr = ' aria-describedby="gets-tip-' . $postId . '"';
+        $tip = '<span class="gets-tip" id="gets-tip-' . $postId . '" role="tooltip">' . h($gets['label']) . '</span>';
+        if ($gets['tier'] !== 'nice') {
+            $fx = '<span class="gets-fx" aria-hidden="true"></span>';
+        }
+    }
+    $out .= '<footer class="' . $footClass . '">'
+        . $fx
+        . '<span class="post-ref"' . $refExtra . ($pollNeeded ? ' data-translation-poll="' . $postId . '"' : '') . '><a class="post-link" href="' . h(fm_thread_url($threadId, $page, $postId)) . '"' . $linkAttr . '>#' . $postId . '</a>'
+        . $tip
         . (!$deleted && $editId !== $postId ? fm_translation_badge_html($post, $translationsByPost[$postId] ?? [], fm_lang(), $fmIsAdmin) : '')
         . '</span>'
         . '<span class="post-when"><time datetime="' . h(gmdate('c', (int) $post['created_at'])) . '">' . h(fm_format_time((int) $post['created_at'])) . '</time>'

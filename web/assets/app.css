@@ -109,12 +109,197 @@ form.inline { display: inline; }
 .poster-id { display: flex; flex-direction: column; min-width: 0; }
 .poster-name { font-size: 1rem; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
 .poster-mail { color: var(--poster-fg); font-size: .72rem; overflow-wrap: anywhere; }
-.post-main { position: relative; padding: 12px 16px 0; min-width: 0; display: flex; flex-direction: column; background: linear-gradient(var(--card), var(--card)); }
+.post-main { position: relative; padding: 12px 16px 0; min-width: 0; display: flex; flex-direction: column; --post-bg: var(--card); background: linear-gradient(var(--post-bg), var(--post-bg)); }
 /* Voetregel onderaan het bericht: permalink links, datum/bewerkt rechts. */
-.post-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin: 10px -16px 0; padding: 4px 10px 5px; border-top: 1px solid var(--line); color: var(--muted); font-size: .78rem; }
+.post-foot { position: relative; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin: 10px -16px 0; padding: 4px 10px 5px; border-top: 1px solid var(--line); color: var(--muted); font-size: .78rem; }
 .post-link { color: var(--muted); text-decoration: none; }
 .post-link:hover { text-decoration: underline; }
 .post-when { text-align: right; }
+.post-foot > .post-ref, .post-foot > .post-when { position: relative; z-index: 1; }
+
+/* Herhaalde eindcijfers: verloop vanuit de linkerrand van de voetregel, achter het nummer,
+   uitvloeiend naar rechts. Brons/zilver/goud/diamant: diagonale lichtstrepen binnen dat
+   verloop, die bij hover een klein stukje naar rechts schuiven en daar blijven.
+   Zes of meer: scrollende regenboog, zonder glans. */
+.post-foot.has-gets { align-items: center; border-bottom-right-radius: 9px; }
+.post-foot.has-gets:not(.gets-nice) .post-when {
+    background: linear-gradient(90deg, transparent, var(--post-bg) 16px);
+    padding-left: 12px;
+}
+.gets-fx { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; border-radius: inherit; }
+.post-foot.gets-dubs .gets-fx {
+    background: linear-gradient(90deg, rgba(156, 98, 48, .55) 0%, rgba(186, 128, 74, .32) 8%, rgba(198, 154, 108, .12) 14%, transparent 20%);
+}
+.post-foot.gets-trips .gets-fx {
+    background: linear-gradient(90deg, rgba(132, 144, 158, .58) 0%, rgba(176, 186, 198, .34) 14%, rgba(214, 220, 228, .12) 28%, transparent 42%);
+}
+.post-foot.gets-quads .gets-fx {
+    background: linear-gradient(90deg, rgba(196, 146, 32, .58) 0%, rgba(224, 180, 62, .36) 18%, rgba(240, 214, 130, .14) 36%, transparent 54%);
+}
+.post-foot.gets-quints .gets-fx {
+    background-image:
+        radial-gradient(circle at 12% 30%, rgba(255, 255, 255, .95) 0 1px, transparent 1.7px),
+        radial-gradient(circle at 22% 72%, rgba(255, 255, 255, .9) 0 1.1px, transparent 1.8px),
+        radial-gradient(circle at 33% 28%, rgba(210, 240, 255, .95) 0 1px, transparent 1.6px),
+        radial-gradient(circle at 44% 68%, rgba(255, 255, 255, .85) 0 1px, transparent 1.6px),
+        radial-gradient(circle at 54% 36%, rgba(186, 228, 255, .95) 0 1.1px, transparent 1.8px),
+        linear-gradient(90deg, rgba(146, 210, 238, .62) 0%, rgba(196, 232, 250, .36) 20%, rgba(228, 246, 255, .14) 42%, transparent 66%);
+    background-repeat: no-repeat;
+}
+.post-foot.gets-rainbow .gets-fx {
+    /* Eén tegel: paars → blauw → cyaan → groen → geel → oranje → rood → weer paars.
+       background-size is de tegelbreedte; de animatie schuift precies één tegel. */
+    background-image: linear-gradient(90deg,
+        rgba(124, 64, 224, .52) 0%,
+        rgba(124, 64, 224, .52) 7%,
+        rgba(48, 104, 240, .52) 14%,
+        rgba(48, 104, 240, .52) 24%,
+        rgba(36, 196, 226, .50) 31%,
+        rgba(36, 196, 226, .50) 41%,
+        rgba(46, 186, 104, .50) 48%,
+        rgba(46, 186, 104, .50) 58%,
+        rgba(236, 198, 48, .50) 65%,
+        rgba(236, 198, 48, .50) 74%,
+        rgba(240, 140, 42, .52) 81%,
+        rgba(240, 140, 42, .52) 88%,
+        rgba(220, 56, 64, .52) 93%,
+        rgba(124, 64, 224, .52) 100%);
+    --gets-rainbow-tile: 480px;
+    background-size: var(--gets-rainbow-tile) 100%;
+    background-repeat: repeat-x;
+    background-position: 0 0;
+    animation: gets-rainbow 8s linear infinite;
+    -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 10%, transparent 68%);
+    mask-image: linear-gradient(90deg, #000 0%, #000 10%, transparent 68%);
+}
+.post-foot.gets-dubs { --gets-fade: 20%; box-shadow: inset 3px 0 0 rgba(138, 82, 38, .9); }
+.post-foot.gets-trips { --gets-fade: 42%; box-shadow: inset 3px 0 0 rgba(120, 132, 146, .95); }
+.post-foot.gets-quads { --gets-fade: 54%; box-shadow: inset 3px 0 0 rgba(176, 128, 24, .95); }
+.post-foot.gets-quints { --gets-fade: 66%; box-shadow: inset 3px 0 0 rgba(96, 176, 210, .95); }
+.post-foot.gets-dubs .post-link { color: #4a3018; font-weight: 700; }
+.post-foot.gets-trips .post-link { color: #2c3540; font-weight: 700; }
+.post-foot.gets-quads .post-link { color: #5c4308; font-weight: 700; }
+.post-foot.gets-quints .post-link { color: #0e4a64; font-weight: 700; }
+.post-foot.gets-rainbow .post-link { color: #1d2733; font-weight: 700; text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 1px 0 #fff; }
+/* Drie diagonale lichtstrepen in het linker-midden van het gekleurde verloop.
+   Ruststand ~14px links van die plek; bij hover schuiven ze ~28px naar rechts
+   (ease-out, 1,6s), worden iets feller, en blijven daar. Nooit tot de rand
+   van de balk en nooit voorbij het verloop. Geen loop. */
+.post-foot.gets-shine { --gets-shine-w: calc(var(--gets-fade) * .34); }
+.post-foot.gets-shine .gets-fx::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: max(6px, calc(var(--gets-fade) * .22 - 14px));
+    width: var(--gets-shine-w);
+    background-image: linear-gradient(102deg,
+        transparent 0%,
+        transparent 4%,
+        rgba(255, 255, 255, .3) 14%,
+        rgba(255, 255, 255, .7) 22%,
+        rgba(255, 255, 255, .3) 30%,
+        transparent 40%,
+        transparent 44%,
+        rgba(255, 255, 255, .38) 54%,
+        rgba(255, 255, 255, .88) 63%,
+        rgba(255, 255, 255, .38) 72%,
+        transparent 82%,
+        transparent 86%,
+        rgba(255, 255, 255, .24) 92%,
+        rgba(255, 255, 255, .55) 97%,
+        transparent 100%);
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    opacity: .72;
+    pointer-events: none;
+    transition: left 1.25s ease, opacity 1.25s ease;
+}
+.post-foot.gets-shine:hover .gets-fx::after,
+.post-foot.gets-shine:focus-within .gets-fx::after {
+    left: min(calc(var(--gets-fade) - var(--gets-shine-w) - 6px), calc(var(--gets-fade) * .22 + 14px));
+    opacity: .95;
+    transition: left 1.6s ease-out, opacity 1.6s ease-out;
+}
+.post-foot.gets-satanic { box-shadow: inset 3px 0 0 rgba(92, 12, 18, .96), -3px 0 8px -4px rgba(120, 12, 18, .45); }
+.post-foot.gets-satanic .gets-fx::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(74, 8, 12, .38) 0%, rgba(120, 16, 22, .14) 16%, transparent 38%);
+    pointer-events: none;
+}
+.post-foot.gets-satanic .post-link { color: #6e1218; }
+.post-foot.gets-holy {
+    box-shadow: inset 2px 0 0 rgba(255, 255, 255, .95), 0 0 8px rgba(255, 255, 255, .8), 0 2px 6px -2px rgba(255, 250, 235, .7);
+}
+.post-foot.gets-holy .gets-fx::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(255, 255, 255, .5) 0%, rgba(255, 255, 255, .18) 16%, transparent 40%);
+    pointer-events: none;
+}
+.post-foot.gets-holy .post-link { text-shadow: 0 0 5px #fff, 0 0 1px #fff; }
+.post-ref[data-gets] { border-radius: 4px; touch-action: manipulation; }
+.gets-tip {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 7px);
+    z-index: 6;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: #14202e;
+    color: #fff;
+    font-size: .8rem;
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(3px);
+    transition: opacity .12s ease, transform .12s ease;
+    box-shadow: 0 4px 14px rgba(20, 32, 46, .22);
+}
+.gets-tip::after {
+    content: "";
+    position: absolute;
+    left: 10px;
+    top: 100%;
+    border: 5px solid transparent;
+    border-top-color: #14202e;
+}
+.post-ref:hover .gets-tip,
+.post-ref:focus-within .gets-tip,
+.post-ref.gets-open .gets-tip { opacity: 1; transform: translateY(0); }
+@keyframes gets-rainbow {
+    from { background-position: 0 0; }
+    to { background-position: var(--gets-rainbow-tile) 0; }
+}
+@media (max-width: 700px) {
+    .post-foot.has-gets { border-bottom-left-radius: 9px; border-bottom-right-radius: 9px; }
+}
+@media (pointer: coarse) {
+    .post-ref[data-gets] { display: inline-flex; align-items: center; min-height: 44px; padding: 0 4px; margin: 0 -4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .post-foot.gets-rainbow .gets-fx { animation: none; background-position: 0 0; }
+    .post-foot.gets-shine .gets-fx::after,
+    .post-foot.gets-shine:hover .gets-fx::after,
+    .post-foot.gets-shine:focus-within .gets-fx::after {
+        transition: none;
+        animation: none;
+        left: max(6px, calc(var(--gets-fade) * .22 - 14px));
+        opacity: .72;
+    }
+    .gets-tip { transition: none; }
+}
+@media (forced-colors: active) {
+    .gets-fx { display: none; }
+    .post-foot.has-gets { box-shadow: none; }
+    .post-foot.has-gets .post-link { color: LinkText; font-weight: 700; text-shadow: none; }
+}
+
 .edited { font-style: italic; }
 .post-body { overflow-wrap: anywhere; flex: 1; }
 .post-body.deleted { color: var(--muted); font-style: italic; }
@@ -180,7 +365,7 @@ form.inline { display: inline; }
     .post-menu { visibility: hidden; }
     .post:hover .post-menu, .post-menu[open], .post-menu:focus-within { visibility: visible; }
 }
-.post.is-deleted .post-main { background: #fdecec; }
+.post.is-deleted .post-main { --post-bg: #fdecec; background: var(--post-bg); }
 .post-body.deleted { color: #8a1c1c; font-style: italic; }
 
 /* Startpagina: drie threadlijsten onder elkaar */
