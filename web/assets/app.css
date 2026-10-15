@@ -188,8 +188,9 @@ form.inline { display: inline; }
    Ruststand vast op 24px voor alle tiers; bij hover ~17px naar rechts
    (easeOutBack, 1,6s), iets feller, blijft staan tot hover eindigt.
    Altijd binnen het verloop, nooit voorbij de linkerrand. */
-/* Vaste startpositie (zoals op dubs) voor alle tiers; breedte vast, maar nooit breder dan past. */
-.post-foot.gets-shine { --gets-shine-w: min(56px, calc(var(--gets-fade) - 12px)); --gets-shine-x: 24px; }
+/* Vaste startpositie (zoals op dubs) voor alle tiers. Breedte 56px, maar nooit
+   zo breed dat 24px rust + 17px reis + 6px rechtermarge buiten het verloop vallen. */
+.post-foot.gets-shine { --gets-shine-x: 24px; --gets-shine-w: min(56px, max(0px, calc(var(--gets-fade) - var(--gets-shine-x) - 17px - 6px))); }
 .post-foot.gets-shine .gets-fx::after {
     content: "";
     position: absolute;
