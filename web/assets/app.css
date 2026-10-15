@@ -118,8 +118,9 @@ form.inline { display: inline; }
 .post-foot > .post-ref, .post-foot > .post-when { position: relative; z-index: 1; }
 
 /* Herhaalde eindcijfers: verloop vanuit de linkerrand van de voetregel, achter het nummer,
-   uitvloeiend naar rechts. Brons/zilver/goud/diamant hebben een diagonale glans die alleen
-   bij hover (of toetsenbordfocus) zacht beweegt. Zes of meer: scrollende regenboog, zonder glans. */
+   uitvloeiend naar rechts. Brons/zilver/goud/diamant: diagonale lichtstrepen die bij hover
+   één keer langzaam naar rechts schuiven en daar blijven. Zes of meer: scrollende regenboog,
+   zonder glans. */
 .post-foot.has-gets { align-items: center; border-bottom-right-radius: 9px; }
 .post-foot.has-gets:not(.gets-nice) .post-when {
     background: linear-gradient(90deg, transparent, var(--post-bg) 16px);
@@ -146,15 +147,27 @@ form.inline { display: inline; }
     background-repeat: no-repeat;
 }
 .post-foot.gets-rainbow .gets-fx {
+    /* Eén tegel: paars → blauw → cyaan → groen → geel → oranje → rood → weer paars.
+       background-size is de tegelbreedte; de animatie schuift precies één tegel. */
     background-image: linear-gradient(90deg,
-        rgba(224, 70, 86, .50) 0%,
-        rgba(236, 138, 40, .48) 16%,
-        rgba(228, 196, 48, .46) 32%,
-        rgba(46, 176, 112, .46) 48%,
-        rgba(40, 148, 214, .50) 64%,
-        rgba(124, 84, 214, .50) 80%,
-        rgba(224, 70, 86, .50) 100%);
-    background-size: 200% 100%;
+        rgba(124, 64, 224, .52) 0%,
+        rgba(124, 64, 224, .52) 7%,
+        rgba(48, 104, 240, .52) 14%,
+        rgba(48, 104, 240, .52) 24%,
+        rgba(36, 196, 226, .50) 31%,
+        rgba(36, 196, 226, .50) 41%,
+        rgba(46, 186, 104, .50) 48%,
+        rgba(46, 186, 104, .50) 58%,
+        rgba(236, 198, 48, .50) 65%,
+        rgba(236, 198, 48, .50) 74%,
+        rgba(240, 140, 42, .52) 81%,
+        rgba(240, 140, 42, .52) 88%,
+        rgba(220, 56, 64, .52) 93%,
+        rgba(124, 64, 224, .52) 100%);
+    --gets-rainbow-tile: 480px;
+    background-size: var(--gets-rainbow-tile) 100%;
+    background-repeat: repeat-x;
+    background-position: 0 0;
     animation: gets-rainbow 8s linear infinite;
     -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 10%, transparent 68%);
     mask-image: linear-gradient(90deg, #000 0%, #000 10%, transparent 68%);
@@ -168,19 +181,46 @@ form.inline { display: inline; }
 .post-foot.gets-quads .post-link { color: #5c4308; font-weight: 700; }
 .post-foot.gets-quints .post-link { color: #0e4a64; font-weight: 700; }
 .post-foot.gets-rainbow .post-link { color: #1d2733; font-weight: 700; text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 1px 0 #fff; }
+/* Drie diagonale lichtstrepen. Ruststand links; bij hover schuiven ze in 1,6s (ease-out)
+   naar rechts, worden iets feller, en blijven daar tot de hover weg is. Loslaten glijdt
+   rustig terug. Geen loop. De eindstand vasthouden is hetzelfde als animation-fill-mode:
+   forwards; een transition laat het terugveren ook animeren. */
 .post-foot.gets-shine .gets-fx::after {
     content: "";
     position: absolute;
-    top: -80%;
-    left: 6%;
-    width: 14px;
-    height: 260%;
-    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, .2) 35%, rgba(255, 255, 255, .82) 50%, rgba(255, 255, 255, .2) 65%, transparent 100%);
-    transform: translateX(0) rotate(22deg);
+    inset: 0;
+    background-image: linear-gradient(102deg,
+        transparent 0%,
+        transparent 8%,
+        rgba(255, 255, 255, .22) 14%,
+        rgba(255, 255, 255, .58) 18%,
+        rgba(255, 255, 255, .22) 23%,
+        transparent 30%,
+        transparent 38%,
+        rgba(255, 255, 255, .3) 44%,
+        rgba(255, 255, 255, .78) 50%,
+        rgba(255, 255, 255, .3) 56%,
+        transparent 64%,
+        transparent 72%,
+        rgba(255, 255, 255, .18) 78%,
+        rgba(255, 255, 255, .52) 84%,
+        rgba(255, 255, 255, .18) 90%,
+        transparent 97%);
+    background-size: 320px 100%;
+    background-repeat: no-repeat;
+    background-position: 0% 0;
+    /* Zachte rand, zodat de strepen ook op het witte stuk van de balk zichtbaar blijven. */
+    filter: drop-shadow(0 0 1px rgba(29, 39, 51, .4));
+    opacity: .62;
     pointer-events: none;
+    transition: background-position 1.25s ease, opacity 1.25s ease;
 }
 .post-foot.gets-shine:hover .gets-fx::after,
-.post-foot.gets-shine:focus-within .gets-fx::after { animation: gets-shine 2.4s ease-in-out infinite; }
+.post-foot.gets-shine:focus-within .gets-fx::after {
+    background-position: 62% 0;
+    opacity: 1;
+    transition: background-position 1.6s ease-out, opacity 1.6s ease-out;
+}
 .post-foot.gets-satanic { box-shadow: inset 3px 0 0 rgba(92, 12, 18, .96), -3px 0 8px -4px rgba(120, 12, 18, .45); }
 .post-foot.gets-satanic .gets-fx::before {
     content: "";
@@ -232,13 +272,9 @@ form.inline { display: inline; }
 .post-ref:hover .gets-tip,
 .post-ref:focus-within .gets-tip,
 .post-ref.gets-open .gets-tip { opacity: 1; transform: translateY(0); }
-@keyframes gets-shine {
-    0%, 100% { transform: translateX(0) rotate(22deg); opacity: .55; }
-    50% { transform: translateX(16px) rotate(22deg); opacity: 1; }
-}
 @keyframes gets-rainbow {
-    from { background-position: 0% 0; }
-    to { background-position: 100% 0; }
+    from { background-position: 0 0; }
+    to { background-position: var(--gets-rainbow-tile) 0; }
 }
 @media (max-width: 700px) {
     .post-foot.has-gets { border-bottom-left-radius: 9px; border-bottom-right-radius: 9px; }
@@ -248,8 +284,14 @@ form.inline { display: inline; }
 }
 @media (prefers-reduced-motion: reduce) {
     .post-foot.gets-rainbow .gets-fx { animation: none; background-position: 0 0; }
+    .post-foot.gets-shine .gets-fx::after,
     .post-foot.gets-shine:hover .gets-fx::after,
-    .post-foot.gets-shine:focus-within .gets-fx::after { animation: none; }
+    .post-foot.gets-shine:focus-within .gets-fx::after {
+        transition: none;
+        animation: none;
+        background-position: 0% 0;
+        opacity: .7;
+    }
     .gets-tip { transition: none; }
 }
 @media (forced-colors: active) {
