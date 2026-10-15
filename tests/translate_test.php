@@ -352,4 +352,19 @@ foreach (['nl', 'en', 'fr', 'de'] as $lg) {
 
 $GLOBALS['copilotTranslate'] = null;
 
+// Vertaalde tekst is ruwe Markdown en wordt met dezelfde renderer getoond.
+$mdBody = "Hallo **team**\n\n<script>alert(1)</script>";
+$mdId = fm_first_post_id(fm_create_thread('general', 'jan@kvt.nl', 'Markdown', $mdBody));
+check(fm_store_translations($mdId, fm_source_hash($mdBody), [
+    'nl' => $mdBody,
+    'en' => "Hello **team**\n\n- item\n\n<script>alert(1)</script>",
+    'fr' => 'Bonjour **equipe**',
+    'de' => "Hallo\n\n> Zitat",
+], 'nl'), 'markdown-vertaling opgeslagen');
+$poll = fm_translation_poll([$mdId], 'en', false);
+check(str_contains($poll[$mdId]['html'] ?? '', '<strong>team</strong>') && str_contains($poll[$mdId]['html'] ?? '', '<li>item</li>'), 'vertaling: vet en lijst');
+check(!str_contains($poll[$mdId]['html'] ?? '', '<script'), 'vertaling: geen ruwe HTML');
+$pollDe = fm_translation_poll([$mdId], 'de', false);
+check(str_contains($pollDe[$mdId]['html'] ?? '', 'message-md-quote'), 'vertaling: citaat');
+
 finish('translate');

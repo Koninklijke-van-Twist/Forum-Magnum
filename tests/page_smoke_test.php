@@ -220,6 +220,16 @@ check_same(1, substr_count($body, '<li class="thread'), 'sectiepagina 2');
 preg_match('/href="(thread\.php\?id=\d+)">Onderwerp 1</', $body, $tm);
 check(str_contains($U('GET', $tm[1])[1], 'href="section.php?s=general&amp;p=2"'), 'terug-link naar de sectiepagina waar de thread staat');
 
+// Berichtopmaak na plaatsen: Markdown, geen ruwe HTML.
+$md = "# Kop\n\n**vet** en _schuin_\n\n- punt\n\n> citaat\n\n[KVT](https://kvt.nl)\n\n```\n<b>code</b>\n```\n\n| kol | b |\n| --- | --- |\n| 1 | 2 |\n\n<script>alert(1)</script>";
+[$s, , $hdr] = $U('POST', 'new.php?s=general', ['csrf' => $csrf, 'title' => 'Opmaak', 'body' => $md]);
+check_same(303, $s, 'thread met markdown');
+[$s, $body] = $U('GET', location($hdr));
+check(str_contains($body, 'message-md-heading') && str_contains($body, '<strong>vet</strong>') && str_contains($body, '<em>schuin</em>'), 'kop, vet en schuin');
+check(str_contains($body, '<li>punt</li>') && str_contains($body, 'message-md-quote') && str_contains($body, 'citaat'), 'lijst en citaat');
+check(str_contains($body, 'href="https://kvt.nl"') && str_contains($body, 'message-md-table') && str_contains($body, '&lt;b&gt;code&lt;/b&gt;'), 'link, tabel en codeblok');
+check(!str_contains($body, '<script>alert'), 'geplaatste html blijft tekst');
+
 // Avatar: initialen-SVG.
 [$s, $body, $hdr] = $U('GET', 'avatar.php?e=tfalken%40kvt.nl');
 check_same(200, $s, 'avatar laadt');
@@ -242,7 +252,7 @@ check(str_contains($body, 'enctype="multipart/form-data"') && str_contains($body
 check(preg_match('/<textarea name="body"[^>]*data-body-or-files/', $nb) === 1 && preg_match('/<textarea name="body"[^>]*required/', $nb) === 0, 'nieuwe thread: tekst niet verplicht als er een bijlage is');
 [$s, , $hdr] = $U('POST', 'new.php?s=work', ['csrf' => $csrf, 'title' => 'Alleen bijlage', 'body' => '', 'files[0]' => new CURLFile($pngFile, 'image/png', 'los.png')]);
 check_same(303, $s, 'thread met alleen een bijlage');
-preg_match_all('/href="file\.php\?id=(\d+)"/', $body, $m);
+preg_match_all('/data-preview="(\d+)"/', $body, $m);
 $ids = array_values(array_unique($m[1]));
 check_same(2, count($ids), 'twee bijlagen getoond');
 check(str_contains($body, '<img src="file.php?id=' . $ids[0] . '&amp;inline=1"'), 'afbeelding als voorbeeld');
@@ -254,6 +264,14 @@ check(stripos($hdr, 'Content-Type: image/png') !== false && stripos($hdr, 'Conte
 check(stripos($hdr, 'Content-Type: application/octet-stream') !== false && stripos($hdr, 'Content-Disposition: attachment; filename="x.svg"') !== false, 'SVG altijd als download');
 check(stripos($hdr, 'sandbox') !== false, 'CSP sandbox op downloads');
 check_same(404, $U('GET', 'file.php?id=999999')[0], 'onbekende bijlage 404');
+[$s, $prev] = $U('GET', 'preview.php?id=' . $ids[0] . '&part=1');
+check($s === 200 && str_contains($prev, 'class="preview-image"') && str_contains($prev, '>Herunterladen<') && str_contains($prev, 'file.php?id=' . $ids[0]), 'voorbeeld afbeelding met downloadknop (DE)');
+check(!str_contains($prev, '<script'), 'voorbeeld zonder script');
+[$s, $prevA] = $A('GET', 'preview.php?id=' . $ids[0] . '&part=1');
+check(str_contains($prevA, '>Downloaden<'), 'downloadknop NL');
+[$s, $prev] = $U('GET', 'preview.php?id=' . $ids[1] . '&part=1');
+check($s === 200 && str_contains($prev, 'language-xml') && !str_contains($prev, '<img') && str_contains($prev, '&lt;script&gt;'), 'svg als bron, niet als afbeelding');
+check_same(404, $U('GET', 'preview.php?id=999999')[0], 'onbekend voorbeeld 404');
 // Zelfde bestand nog eens (reactie van admin): één bestand op schijf.
 $A('POST', $attThread, ['action' => 'reply', 'csrf' => $acsrf, 'body' => '', 'files[0]' => new CURLFile($pngFile, 'image/png', 'kopie.png')]);
 $stored = glob($data . '/files/*/*/*') ?: [];
@@ -269,6 +287,7 @@ check_same(1, count(glob($data . '/files/*/*/*') ?: []), 'bestand zonder verwijz
 // Bericht verwijderen: koppelingen weg, gedeeld bestand blijft voor de andere post.
 $U('POST', $attThread, ['action' => 'delete', 'csrf' => $csrf, 'post' => (int) $pm[1]]);
 check_same(404, $U('GET', 'file.php?id=' . $ids[0])[0], 'bijlage van verwijderd bericht weg');
+check_same(404, $U('GET', 'preview.php?id=' . $ids[0])[0], 'voorbeeld van verwijderd bericht weg');
 check_same(1, count(glob($data . '/files/*/*/*') ?: []), 'gedeeld bestand blijft (reactie admin)');
 
 // Mentions, meldingen en ongelezen-kleuring.
@@ -307,7 +326,7 @@ check(!str_contains($body, 'is-unread'), 'na lezen geen ongelezen-omlijning');
 [$s, $body] = $A('GET', 'notifications.php?tab=mentions');
 check(!str_contains($body, 'class="thread is-unread"'), 'vermelding gelezen');
 
-foreach (['assets/app.css', 'assets/app.js', 'assets/company/kvt.svg', 'assets/flags/nl.svg', 'assets/flags/fr.svg', 'assets/flags/de.svg', 'assets/flags/en.svg', 'thumbnail.png'] as $asset) {
+foreach (['assets/app.css', 'assets/app.js', 'assets/highlight.min.js', 'assets/highlight-github-dark.min.css', 'assets/company/kvt.svg', 'assets/flags/nl.svg', 'assets/flags/fr.svg', 'assets/flags/de.svg', 'assets/flags/en.svg', 'thumbnail.png'] as $asset) {
     check_same(200, $U('GET', $asset)[0], "$asset bereikbaar");
 }
 check_same(404, $U('GET', 'section.php?s=bots')[0], 'onbekende sectie 404');

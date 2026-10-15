@@ -45,7 +45,7 @@ het logo (`web/thumbnail.png`) is gebleven.
    `$companyLogos = ['voorbeeld' => ['voorbeeld.nl', 'Voorbeeld BV']];`.
 3. Zonder bestand valt een bedrijf terug op het KVT-logo (`kvt.svg`). Aanwezig: `kvt.svg`,
    `vantwistvastgoed.svg`.
-- Berichtopmaak: overgenomen uit Asclepius (`web/lib/markdown.php`): vet/cursief, code,
+- Berichtopmaak: overgenomen uit Asclepius (`web/lib/markdown.php`): vet/cursief (`**`/`__` en `*`/`_`), code,
   codeblokken, lijsten, citaten, tabellen, toetsen (`[Ctrl]`), autodetectie van URL's,
   e-mail en telefoonnummers (URL's, e-mails, markdownlinks en code gaan niet nog eens door
   de telefoondetector). Alle tekst wordt eerst ge-escaped; alleen http(s)/mailto-links.
@@ -61,8 +61,9 @@ het logo (`web/thumbnail.png`) is gebleven.
   transactie herberekend. Alle formulieren hebben CSRF-bescherming.
 
 - Bijlagen in Asclepius-stijl: max. 20 MB per bestand (zoals `MAX_ATTACHMENT_BYTES` in
-  Asclepius) en max. 10 per bericht. Afbeeldingen (png/jpg/gif/webp/bmp) worden als
-  voorbeeld getoond, andere bestanden als downloadlink. Met `[[attachment:naam]]` zet je een
+  Asclepius) en max. 10 per bericht. Een klik op de miniatuur of de bestandsnaam opent
+  eerst een voorbeeld (afbeelding, video, pdf, Office als Markdown, code met syntaxiskleuring,
+  Markdown gerenderd). Onderaan staat Downloaden. Met `[[attachment:naam]]` zet je een
   bijlage op een vaste plek in de tekst. Bij bewerken kun je bijlagen weghalen en toevoegen.
   - Opslag content-addressed: `web/data/files/ab/cd/<sha256>`, plus koppeltabel
     `post_attachments` (post_id, hash, originele naam, mime, grootte). Hetzelfde bestand
@@ -70,8 +71,9 @@ het logo (`web/thumbnail.png`) is gebleven.
   - Een bericht verwijderen of een bijlage weghalen verwijdert de koppeling. Het bestand
     zelf gaat pas weg als geen enkel bericht er nog naar verwijst; dat opruimen gebeurt na
     de transactie, in een eigen `BEGIN IMMEDIATE`.
-  - Downloaden alleen via `file.php` (vereist login). Alleen rasterafbeeldingen gaan
-    inline met hun eigen type; al het andere (ook SVG) als `application/octet-stream`
+  - Downloaden alleen via `file.php` (vereist login), het voorbeeld via `preview.php`
+    met dezelfde controle (geen bijlage van een verwijderd bericht). Rasterafbeeldingen,
+    video en PDF mogen inline; al het andere (ook SVG) als `application/octet-stream`
     met `attachment`, `nosniff` en `CSP: sandbox`. `data/` zelf is via `.htaccess`
     afgeschermd.
   - Let op de PHP-limieten op de server: `upload_max_filesize` ≥ 20M en `post_max_size`

@@ -12,6 +12,9 @@ check(!str_contains($html, '<script') && !str_contains($html, '<img'), 'HTML wor
 check(!str_contains($r('[klik](javascript:alert(1))'), 'href="javascript'), 'javascript:-link geweigerd');
 check(!str_contains($r('[x](https://a.nl/" onmouseover="alert(1))'), '" onmouseover'), 'attribuut-injectie geweigerd');
 check(str_contains($r('**vet** en *schuin*'), '<strong>vet</strong>') && str_contains($r('*schuin*'), '<em>schuin</em>'), 'nadruk');
+check(str_contains($r('__vet__ en _schuin_'), '<strong>vet</strong>') && str_contains($r('voor _schuin_ na'), '<em>schuin</em>'), 'underscore-nadruk');
+check(!str_contains($r('snake_case_name en file_name.txt'), '<em>'), 'geen nadruk in snake_case');
+check(str_contains($r("# Kop\n\n> een citaat"), 'class="message-md-heading') && str_contains($r('> een citaat'), 'message-md-quote'), 'kop en citaat');
 check(str_contains($r("```\n<b>x</b>\n```"), '<pre class="message-md-pre"><code>&lt;b&gt;x&lt;/b&gt;</code></pre>'), 'codeblok ge-escaped');
 check(str_contains($r("- een\n- twee"), '<ul class="message-md-list"><li>een</li><li>twee</li></ul>'), 'lijst');
 check(str_contains($r("| a | b |\n|---|---|\n| 1 | 2 |"), '<table class="message-md-table">'), 'tabel');

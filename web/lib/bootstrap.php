@@ -14,6 +14,7 @@ require_once __DIR__ . '/users.php';
 require_once __DIR__ . '/mentions.php';
 require_once __DIR__ . '/profile.php';
 require_once __DIR__ . '/markdown.php';
+require_once __DIR__ . '/preview.php';
 require_once __DIR__ . '/translate.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/postview.php';

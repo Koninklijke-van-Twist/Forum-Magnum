@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 /**
- * Bijlagen in Asclepius-stijl (20 MB per bestand, afbeeldingen als voorbeeld,
- * andere bestanden als downloadlink, [[attachment:naam]] in de tekst).
+ * Bijlagen in Asclepius-stijl (20 MB per bestand, klik opent een voorbeeldmodal,
+ * [[attachment:naam]] in de tekst). Downloaden gaat via de knop in de modal.
  *
  * Opslag content-addressed: data/files/ab/cd/<sha256>. Hetzelfde bestand twee keer
  * uploaden = één bestand op schijf; post_attachments koppelt bericht en hash.
@@ -313,17 +313,19 @@ function fm_format_size(int $bytes): string
     return $bytes . ' B';
 }
 
-/** Eén bijlage: afbeelding als voorbeeld, anders downloadlink (zoals Asclepius). */
+/** Eén bijlage: klik (miniatuur of naam) opent het voorbeeld; download zit in de modal. */
 function fm_attachment_html(array $attachment): string
 {
     $name = (string) $attachment['original_name'];
+    $id = (int) $attachment['id'];
+    $preview = 'preview.php?' . http_build_query(['id' => $id]);
     $html = '<div class="attachment">';
     if (fm_is_inline_image($attachment)) {
-        $html .= '<a class="attachment-thumb" href="' . h(fm_attachment_url($attachment, true)) . '" target="_blank" rel="noopener">'
+        $html .= '<a class="attachment-thumb" href="' . h($preview) . '" data-preview="' . $id . '">'
             . '<img src="' . h(fm_attachment_url($attachment, true)) . '" alt="' . h($name) . '" loading="lazy" decoding="async"></a>';
     }
 
-    return $html . '<a class="attachment-link" href="' . h(fm_attachment_url($attachment)) . '" download="' . h($name) . '">📎 ' . h($name)
+    return $html . '<a class="attachment-link" href="' . h($preview) . '" data-preview="' . $id . '">📎 ' . h($name)
         . ' <span class="meta">(' . h(fm_format_size((int) $attachment['size'])) . ')</span></a></div>';
 }
 
