@@ -191,17 +191,17 @@ form.inline { display: inline; }
 }
 .post-foot.gets-satanic .post-link { color: #6e1218; }
 .post-foot.gets-holy {
-    box-shadow: inset 2px 0 0 rgba(255, 255, 255, .98), 0 0 10px rgba(255, 255, 255, .95), 0 3px 8px -2px rgba(255, 250, 235, .9);
+    box-shadow: inset 2px 0 0 rgba(255, 255, 255, .95), 0 0 8px rgba(255, 255, 255, .8), 0 2px 6px -2px rgba(255, 250, 235, .7);
 }
 .post-foot.gets-holy .gets-fx::before {
     content: "";
     position: absolute;
     inset: 0;
-    background: linear-gradient(90deg, rgba(255, 255, 255, .78) 0%, rgba(255, 255, 255, .32) 22%, transparent 50%);
+    background: linear-gradient(90deg, rgba(255, 255, 255, .5) 0%, rgba(255, 255, 255, .18) 16%, transparent 40%);
     pointer-events: none;
 }
-.post-foot.gets-holy .post-link { text-shadow: 0 0 6px #fff, 0 0 2px #fff; }
-.post-ref[data-gets] { border-radius: 4px; }
+.post-foot.gets-holy .post-link { text-shadow: 0 0 5px #fff, 0 0 1px #fff; }
+.post-ref[data-gets] { border-radius: 4px; touch-action: manipulation; }
 .gets-tip {
     position: absolute;
     left: 0;
