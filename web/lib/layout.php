@@ -119,17 +119,74 @@ function fm_new_thread_url(string $section): string
     return 'new.php?' . http_build_query(['s' => $section]);
 }
 
-/** Kop + nieuwe-thread-knop + lijst + paginering van één sectie. */
-function fm_section_block_html(string $section, string $email, int $page, int $perPage, callable $pageUrl, string $tag): string
+/**
+ * Kop + nieuwe-thread-knop + lijst + paginering van één sectie.
+ * $headingHtml vervangt de kop (bijv. een kruimelpad op de sectiepagina).
+ */
+function fm_section_block_html(string $section, string $email, int $page, int $perPage, callable $pageUrl, string $tag, ?string $headingHtml = null): string
 {
     $pages = fm_page_count(fm_count_threads($section), $perPage);
     $page = max(1, min($pages, $page));
+    $heading = $headingHtml ?? ('<' . $tag . '><a class="section-link" href="' . h(fm_section_page_url($section)) . '">' . h(fm_section_label($section)) . '</a></' . $tag . '>');
 
-    return '<div class="bar"><' . $tag . '><a class="section-link" href="' . h(fm_section_page_url($section)) . '">' . h(fm_section_label($section)) . '</a></' . $tag . '>'
+    return '<div class="bar">' . $heading
         . (fm_can_create_thread($section, $email) ? '<a class="btn" href="' . h(fm_new_thread_url($section)) . '">' . h(fm_t('new_thread')) . '</a>' : '')
         . '</div>'
         . fm_thread_list_html(fm_list_threads($section, $email, $page, $perPage))
         . fm_pagination($page, $pages, $pageUrl);
+}
+
+/**
+ * Paginatitel als kruimelpad. Eerste item is altijd Forum Magnum (link naar de start).
+ * Het laatste item is de huidige pagina (platte tekst); eerdere items met url zijn links.
+ * Lange titels krijgen title="…" en class="truncate" zodat CSS ze afkapt.
+ *
+ * @param list<array{0:string,1:?string}> $trail
+ */
+function fm_breadcrumb_html(array $trail): string
+{
+    $items = array_merge([['Forum Magnum', 'index.php']], $trail);
+    $last = count($items) - 1;
+    $html = '<nav class="breadcrumb" aria-label="breadcrumb"><ol>';
+    foreach ($items as $i => [$label, $url]) {
+        $label = (string) $label;
+        $isLast = $i === $last;
+        $clip = $isLast || mb_strlen($label) > 24;
+        $title = mb_strlen($label) > 24 ? ' title="' . h($label) . '"' : '';
+        $html .= '<li' . ($clip ? ' class="truncate"' : '') . ($isLast ? ' aria-current="page"' : '') . '>';
+        if (!$isLast && is_string($url) && $url !== '') {
+            $html .= '<a href="' . h($url) . '"' . $title . '>' . h($label) . '</a>';
+        } else {
+            $html .= '<span' . $title . '>' . h($label) . '</span>';
+        }
+        $html .= '</li>';
+    }
+
+    return $html . '</ol></nav>';
+}
+
+/**
+ * Kruimels van een bijlagepagina, ná Forum Magnum: sectie, thread, bestandsnaam.
+ *
+ * @return list<array{0:string,1:?string}>
+ */
+function fm_attachment_trail(array $attachment): array
+{
+    $trail = [];
+    $post = fm_get_post((int) ($attachment['post_id'] ?? 0));
+    if ($post !== null) {
+        $thread = fm_get_thread((int) $post['thread_id']);
+        if ($thread !== null && fm_is_section((string) $thread['section'])) {
+            $section = (string) $thread['section'];
+            $trail[] = [fm_section_label($section), fm_section_page_url($section, fm_thread_list_page($thread))];
+            $postId = (int) $post['id'];
+            $threadId = (int) $thread['id'];
+            $trail[] = [(string) $thread['title'], fm_thread_url($threadId, fm_page_of_post($threadId, $postId), $postId)];
+        }
+    }
+    $trail[] = [(string) ($attachment['original_name'] ?? ''), null];
+
+    return $trail;
 }
 
 /** Threadlijst (laatste bericht eerst) als HTML. */
