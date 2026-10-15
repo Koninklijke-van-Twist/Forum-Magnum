@@ -15,6 +15,8 @@ const FM_PREVIEW_MAX_SLIDES = 8;
 const FM_PREVIEW_MAX_BLOCKS = 200;
 const FM_PREVIEW_MAX_XML = 1500000;
 const FM_PREVIEW_MAX_TEXT = 100000;
+/** Bovengrens voor OLE-ketens (directory, mini-stream, workbook samen). */
+const FM_OLE_MAX_BYTES = 4194304;
 
 /** Extensie => highlight.js-taal. Markdown staat hier niet: die wordt gerenderd. */
 const FM_CODE_LANG = [
@@ -824,6 +826,48 @@ function fm_ole_u32(string $d, int $o): int
     return $o + 4 <= strlen($d) ? unpack('V', substr($d, $o, 4))[1] : 0;
 }
 
+/**
+ * Volgt een sector-keten. Een herhaalde sector (cyclus) levert null.
+ * De stroom wordt afgekapt op de gevraagde grootte, het resterende budget
+ * en FM_OLE_MAX_BYTES, zodat een te groot veld in de header niets extra's alloceert.
+ *
+ * @param callable(int): string $sector
+ * @param callable(int): int $next
+ */
+function fm_ole_read_chain(callable $sector, callable $next, int $start, int $size, int $sectorSize, int &$budget): ?string
+{
+    if ($size <= 0 || $budget <= 0 || $sectorSize < 1) {
+        return $size === 0 ? '' : null;
+    }
+    $limit = min($size, $budget, FM_OLE_MAX_BYTES);
+    $out = '';
+    $id = $start;
+    $seen = [];
+    $maxSteps = intdiv(FM_OLE_MAX_BYTES, $sectorSize) + 1;
+    while ($id < 0xFFFFFFFA && count($seen) < $maxSteps && strlen($out) < $limit) {
+        if (isset($seen[$id])) {
+            return null;
+        }
+        $seen[$id] = true;
+        $chunk = $sector($id);
+        if ($chunk === '') {
+            break;
+        }
+        if (strlen($out) + strlen($chunk) > FM_OLE_MAX_BYTES) {
+            return null;
+        }
+        $out .= $chunk;
+        $id = $next($id);
+    }
+    if ($id < 0xFFFFFFFA && isset($seen[$id]) && strlen($out) < $limit) {
+        return null;
+    }
+    $out = substr($out, 0, $limit);
+    $budget -= strlen($out);
+
+    return $out;
+}
+
 /** Workbook-stroom uit een OLE-bestand, of null. */
 function fm_ole_workbook(string $data): ?string
 {
@@ -840,9 +884,11 @@ function fm_ole_workbook(string $data): ?string
     $dirFirst = fm_ole_u32($data, 0x30);
     $miniCutoff = fm_ole_u32($data, 0x38);
     $fatCount = fm_ole_u32($data, 0x2C);
-    if ($fatCount < 1 || $fatCount > 4096) {
+    $availableSectors = intdiv(max(0, strlen($data) - $sectorSize), $sectorSize);
+    if ($fatCount < 1 || $fatCount > $availableSectors || $fatCount > 4096) {
         return null;
     }
+    $budget = min(strlen($data), FM_OLE_MAX_BYTES);
     $sector = static function (int $id) use ($data, $sectorSize): string {
         if ($id < 0 || $id > 0xFFFFFFFA) {
             return '';
@@ -860,8 +906,12 @@ function fm_ole_workbook(string $data): ?string
         $fatIds[] = $id;
     }
     $difat = fm_ole_u32($data, 0x44);
-    $guard = 0;
-    while (count($fatIds) < $fatCount && $difat < 0xFFFFFFFA && $guard++ < 1024) {
+    $seenDifat = [];
+    while (count($fatIds) < $fatCount && $difat < 0xFFFFFFFA && count($seenDifat) < 64) {
+        if (isset($seenDifat[$difat])) {
+            return null;
+        }
+        $seenDifat[$difat] = true;
         $block = $sector($difat);
         if ($block === '') {
             break;
@@ -876,35 +926,26 @@ function fm_ole_workbook(string $data): ?string
         $difat = fm_ole_u32($block, ($entries - 1) * 4);
     }
     $fat = '';
+    $seenFat = [];
     foreach ($fatIds as $id) {
-        $fat .= $sector($id);
+        if (isset($seenFat[$id])) {
+            return null;
+        }
+        $seenFat[$id] = true;
+        $chunk = $sector($id);
+        if ($chunk === '' || strlen($fat) + strlen($chunk) > $budget) {
+            return null;
+        }
+        $fat .= $chunk;
     }
     $next = static function (int $id) use ($fat): int {
         $o = $id * 4;
 
         return $o >= 0 && $o + 4 <= strlen($fat) ? fm_ole_u32($fat, $o) : 0xFFFFFFFE;
     };
-    $readChain = static function (int $start, int $size) use ($sector, $next, $sectorSize): string {
-        $out = '';
-        $id = $start;
-        $guard = 0;
-        while ($id < 0xFFFFFFFA && $guard++ < 100000 && strlen($out) <= $size) {
-            $chunk = $sector($id);
-            if ($chunk === '') {
-                break;
-            }
-            $out .= $chunk;
-            $id = $next($id);
-        }
-
-        return substr($out, 0, $size);
-    };
-    $dir = '';
-    $id = $dirFirst;
-    $guard = 0;
-    while ($id < 0xFFFFFFFA && $guard++ < 64) {
-        $dir .= $sector($id);
-        $id = $next($id);
+    $dir = fm_ole_read_chain($sector, $next, $dirFirst, min(strlen($data), 262144), $sectorSize, $budget);
+    if ($dir === null) {
+        return null;
     }
     $entries = [];
     for ($i = 0, $n = intdiv(strlen($dir), 128); $i < $n; $i++) {
@@ -927,14 +968,20 @@ function fm_ole_workbook(string $data): ?string
             break;
         }
     }
-    $mini = $root !== null && $root['size'] > 0 ? $readChain($root['start'], $root['size']) : '';
+    $mini = '';
+    if ($root !== null && $root['size'] > 0) {
+        $mini = fm_ole_read_chain($sector, $next, $root['start'], $root['size'], $sectorSize, $budget);
+        if ($mini === null) {
+            return null;
+        }
+    }
     $miniFat = '';
     $miniFirst = fm_ole_u32($data, 0x3C);
-    $id = $miniFirst;
-    $guard = 0;
-    while ($id < 0xFFFFFFFA && $guard++ < 32) {
-        $miniFat .= $sector($id);
-        $id = $next($id);
+    if ($miniFirst < 0xFFFFFFFA) {
+        $miniFat = fm_ole_read_chain($sector, $next, $miniFirst, strlen($data), $sectorSize, $budget);
+        if ($miniFat === null) {
+            return null;
+        }
     }
     foreach ($entries as $e) {
         if ($e['type'] !== 2 || !in_array($e['name'], ['workbook', 'book'], true)) {
@@ -943,20 +990,33 @@ function fm_ole_workbook(string $data): ?string
         if ($miniCutoff > 0 && $e['size'] < $miniCutoff) {
             $out = '';
             $sid = $e['start'];
-            $guard = 0;
-            while ($sid < 0xFFFFFFFA && $guard++ < 100000 && strlen($out) < $e['size']) {
-                $out .= substr($mini, $sid * $miniSize, $miniSize);
+            $seen = [];
+            $limit = min($e['size'], $budget, FM_OLE_MAX_BYTES);
+            $maxSteps = intdiv(FM_OLE_MAX_BYTES, max(1, $miniSize)) + 1;
+            while ($sid < 0xFFFFFFFA && count($seen) < $maxSteps && strlen($out) < $limit) {
+                if (isset($seen[$sid])) {
+                    return null;
+                }
+                $seen[$sid] = true;
+                $piece = substr($mini, $sid * $miniSize, $miniSize);
+                if ($piece === '' || strlen($out) + strlen($piece) > FM_OLE_MAX_BYTES) {
+                    break;
+                }
+                $out .= $piece;
                 $o = $sid * 4;
                 if ($o + 4 > strlen($miniFat)) {
                     break;
                 }
                 $sid = fm_ole_u32($miniFat, $o);
             }
+            if ($sid < 0xFFFFFFFA && isset($seen[$sid]) && strlen($out) < $limit) {
+                return null;
+            }
 
-            return substr($out, 0, $e['size']);
+            return substr($out, 0, $limit);
         }
 
-        return $readChain($e['start'], $e['size']);
+        return fm_ole_read_chain($sector, $next, $e['start'], $e['size'], $sectorSize, $budget);
     }
 
     return null;
@@ -980,9 +1040,13 @@ function fm_xls_markdown(string $path): ?array
     if (str_starts_with($head, '<?xml') || str_starts_with($head, '<')) {
         return fm_spreadsheetml_markdown($data);
     }
-    $wb = fm_ole_workbook($data);
+    if (str_starts_with($data, "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1")) {
+        $wb = fm_ole_workbook($data);
 
-    return fm_biff_markdown($wb ?? $data);
+        return $wb === null ? null : fm_biff_markdown($wb);
+    }
+
+    return fm_biff_markdown($data);
 }
 
 function fm_docx_text(DOMElement $el): string

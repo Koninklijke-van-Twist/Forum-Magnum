@@ -220,6 +220,67 @@ file_put_contents($xlsPath, $ole);
 $xlsHtml = px_html('binair.xls', 'application/vnd.ms-excel', $xlsPath);
 check(str_contains($xlsHtml, 'Naam') && str_contains($xlsHtml, '&lt;b&gt;') && str_contains($xlsHtml, '4.5'), 'binair xls via OLE');
 
+$pxOle = static function (int $streamSize, array $fatMap, string $body) use ($oleEntry): string {
+    $sector = 512;
+    $fat = array_fill(0, 128, 0xFFFFFFFF);
+    $fat[0] = 0xFFFFFFFD;
+    $fat[1] = 0xFFFFFFFE;
+    foreach ($fatMap as $idx => $val) {
+        $fat[(int) $idx] = $val;
+    }
+    $fatBin = '';
+    foreach ($fat as $v) {
+        $fatBin .= pack('V', $v);
+    }
+    $dir = $oleEntry('Root Entry', 5, 0xFFFFFFFE, 0, 1) . $oleEntry('Workbook', 2, 2, $streamSize, 0xFFFFFFFF);
+    $dir .= str_repeat("\0", $sector - (strlen($dir) % $sector));
+    $body .= str_repeat("\0", ($sector - (strlen($body) % $sector)) % $sector);
+    $header = str_repeat("\0", $sector);
+    $header = substr_replace($header, "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1", 0, 8);
+    $header = substr_replace($header, pack('v', 0x003E), 0x18, 2);
+    $header = substr_replace($header, pack('v', 3), 0x1A, 2);
+    $header = substr_replace($header, pack('v', 0xFFFE), 0x1C, 2);
+    $header = substr_replace($header, pack('v', 9), 0x1E, 2);
+    $header = substr_replace($header, pack('v', 6), 0x20, 2);
+    $header = substr_replace($header, pack('V', 1), 0x2C, 4);
+    $header = substr_replace($header, pack('V', 1), 0x30, 4);
+    $header = substr_replace($header, pack('V', 0), 0x38, 4);
+    $header = substr_replace($header, pack('V', 0xFFFFFFFE), 0x3C, 4);
+    $header = substr_replace($header, pack('V', 0xFFFFFFFE), 0x44, 4);
+    $header = substr_replace($header, pack('V', 0), 0x4C, 4);
+    for ($i = 1; $i < 109; $i++) {
+        $header = substr_replace($header, pack('V', 0xFFFFFFFF), 0x4C + 4 * $i, 4);
+    }
+
+    return $header . $fatBin . $dir . $body;
+};
+$cyclic = $pxOle(50_000_000, [2 => 2], 'x');
+$peak = memory_get_peak_usage();
+$cyclicWb = fm_ole_workbook($cyclic);
+check($cyclicWb === null, 'cyclische OLE-keten levert geen workbook');
+check(memory_get_peak_usage() - $peak < 8 * 1024 * 1024, 'cyclische OLE alloceert niet de geclaimde grootte');
+$cyclicPath = tempnam(getenv('FM_DATA_DIR'), 'cyc');
+file_put_contents($cyclicPath, $cyclic);
+$cyclicHtml = px_html('cyclus.xls', 'application/vnd.ms-excel', $cyclicPath);
+check(str_contains($cyclicHtml, fm_t('preview_failed')) && str_contains($cyclicHtml, '>Downloaden<'), 'cyclische OLE: geen voorbeeld, wel download');
+check(strlen($cyclicHtml) < 8000, 'cyclische OLE-preview blijft klein');
+$dirCycle = $pxOle(100, [1 => 1, 2 => 0xFFFFFFFE], 'ABCD');
+check(fm_ole_workbook($dirCycle) === null, 'cyclische directory-keten stopt');
+$huge = $pxOle(0xFFFFFFFF, [2 => 0xFFFFFFFE], 'ABCD');
+$hugeWb = fm_ole_workbook($huge);
+check(is_string($hugeWb) && str_starts_with($hugeWb, 'ABCD') && strlen($hugeWb) <= 512, 'te grote OLE-stroom wordt afgekapt op de sector');
+$fatBomb = substr_replace($huge, pack('V', 100000), 0x2C, 4);
+check(fm_ole_workbook($fatBomb) === null, 'OLE met te veel FAT-sectoren stopt');
+
+check_same('preview.php?id=42', fm_safe_return_url('/forum-magnum/preview.php?id=42'), 'preview-id blijft na taalwissel');
+check_same('preview.php?id=42&part=1', fm_safe_return_url('preview.php?id=42&part=1&next=nope'), 'preview houdt part, extra parameter weg');
+check_same('index.php', fm_safe_return_url('preview.php?id=0'), 'preview zonder geldig id');
+check_same('index.php', fm_safe_return_url("preview.php?id=42\nSet-Cookie: x"), 'preview met stuurteken');
+check_same('index.php', fm_safe_return_url('preview.php?id=1&next=https://evil.example'), 'preview met //');
+check_same('section.php?s=general', fm_safe_return_url('/forum-magnum/section.php?s=general'), 'sectie-query blijft');
+check_same('new.php?s=announcements', fm_safe_return_url('new.php?s=announcements'), 'new-query blijft');
+check_same('index.php', fm_safe_return_url('https://evil.example/'), 'externe terug-url');
+
 $bad = tempnam(getenv('FM_DATA_DIR'), 'bad');
 file_put_contents($bad, 'dit is geen zip');
 $badHtml = px_html('kapot.xlsx', 'application/octet-stream', $bad);
