@@ -181,45 +181,46 @@ form.inline { display: inline; }
 .post-foot.gets-quads .post-link { color: #5c4308; font-weight: 700; }
 .post-foot.gets-quints .post-link { color: #0e4a64; font-weight: 700; }
 .post-foot.gets-rainbow .post-link { color: #1d2733; font-weight: 700; text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 1px 0 #fff; }
-/* Drie diagonale lichtstrepen in het linker-midden van het gekleurde verloop.
-   Ruststand ~14px links van die plek; bij hover schuiven ze ~28px naar rechts
-   (ease-out, 1,6s), worden iets feller, en blijven daar. Nooit tot de rand
-   van de balk en nooit voorbij het verloop. Geen loop. */
-.post-foot.gets-shine { --gets-shine-w: calc(var(--gets-fade) * .34); }
+/* Twee diagonale lichtstrepen in het gekleurde verloop: eerst een brede,
+   zachte streep, daarna een duidelijk smallere. Eén niet-herhalende laag met
+   volledig transparante randen (geen lijntjes aan begin/eind van de balk).
+   Ruststand ~8px links van de conceptplek; bij hover ~17px naar rechts
+   (easeOutBack, 1,6s), iets feller, blijft staan tot hover eindigt.
+   Altijd binnen het verloop, nooit voorbij de linkerrand. */
+.post-foot.gets-shine { --gets-shine-w: calc(var(--gets-fade) * .34); --gets-shine-x: calc(var(--gets-fade) * .22); }
 .post-foot.gets-shine .gets-fx::after {
     content: "";
     position: absolute;
     top: 0;
     bottom: 0;
-    left: max(6px, calc(var(--gets-fade) * .22 - 14px));
+    left: max(6px, calc(var(--gets-shine-x) - 8px));
     width: var(--gets-shine-w);
-    background-image: linear-gradient(102deg,
-        transparent 0%,
-        transparent 4%,
-        rgba(255, 255, 255, .3) 14%,
-        rgba(255, 255, 255, .7) 22%,
-        rgba(255, 255, 255, .3) 30%,
-        transparent 40%,
-        transparent 44%,
-        rgba(255, 255, 255, .38) 54%,
-        rgba(255, 255, 255, .88) 63%,
-        rgba(255, 255, 255, .38) 72%,
-        transparent 82%,
-        transparent 86%,
-        rgba(255, 255, 255, .24) 92%,
-        rgba(255, 255, 255, .55) 97%,
-        transparent 100%);
+    background-image: linear-gradient(110deg,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(255, 255, 255, 0) 8%,
+        rgba(255, 255, 255, .28) 20%,
+        rgba(255, 255, 255, .62) 32%,
+        rgba(255, 255, 255, .62) 42%,
+        rgba(255, 255, 255, .28) 54%,
+        rgba(255, 255, 255, 0) 64%,
+        rgba(255, 255, 255, 0) 72%,
+        rgba(255, 255, 255, .5) 77%,
+        rgba(255, 255, 255, .85) 80%,
+        rgba(255, 255, 255, .5) 83%,
+        rgba(255, 255, 255, 0) 88%,
+        rgba(255, 255, 255, 0) 100%);
     background-repeat: no-repeat;
     background-size: 100% 100%;
+    background-position: 0 0;
     opacity: .72;
     pointer-events: none;
-    transition: left 1.25s ease, opacity 1.25s ease;
+    transition: left 1.6s ease-in-out, opacity 1.6s ease-in-out;
 }
 .post-foot.gets-shine:hover .gets-fx::after,
 .post-foot.gets-shine:focus-within .gets-fx::after {
-    left: min(calc(var(--gets-fade) - var(--gets-shine-w) - 6px), calc(var(--gets-fade) * .22 + 14px));
+    left: max(6px, min(calc(var(--gets-fade) - var(--gets-shine-w) - 6px), calc(var(--gets-shine-x) + 9px)));
     opacity: .95;
-    transition: left 1.6s ease-out, opacity 1.6s ease-out;
+    transition: left 1.6s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 1.6s ease-out;
 }
 .post-foot.gets-satanic { box-shadow: inset 3px 0 0 rgba(92, 12, 18, .96), -3px 0 8px -4px rgba(120, 12, 18, .45); }
 .post-foot.gets-satanic .gets-fx::before {
@@ -289,7 +290,7 @@ form.inline { display: inline; }
     .post-foot.gets-shine:focus-within .gets-fx::after {
         transition: none;
         animation: none;
-        left: max(6px, calc(var(--gets-fade) * .22 - 14px));
+        left: max(6px, calc(var(--gets-shine-x) - 8px));
         opacity: .72;
     }
     .gets-tip { transition: none; }
