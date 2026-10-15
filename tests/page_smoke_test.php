@@ -119,7 +119,7 @@ check_same(403, $s, 'gebruiker kan geen aankondiging posten');
 check_same('new.php?s=announcements', location($hdr), 'taalwissel op nieuwe-thread-pagina blijft daar');
 [$s, $body] = $A('GET', 'new.php?s=announcements');
 check(str_contains($body, 'id="new-thread"'), 'admin ziet nieuw-thread-formulier');
-check(preg_match('#<nav class="breadcrumb" aria-label="breadcrumb"><ol><li><a href="index\.php">Forum Magnum</a></li><li><a href="section\.php\?s=announcements">Aankondigingen</a></li><li class="truncate" aria-current="page"><span>Nieuwe thread</span></li></ol></nav>#', $body) === 1, 'nieuwe thread: Forum Magnum > Aankondigingen > Nieuwe thread');
+check(preg_match('#<nav class="breadcrumb" aria-label="breadcrumb"><ol><li><a href="index\.php">Forum Magnum</a></li><li><a href="section\.php\?s=announcements">Aankondigingen</a></li><li class="truncate" aria-current="page"><span title="Nieuwe thread">Nieuwe thread</span></li></ol></nav>#', $body) === 1, 'nieuwe thread: Forum Magnum > Aankondigingen > Nieuwe thread');
 check(!str_contains($body, '<div class="bar"><h1>'), 'nieuwe thread: geen h1-titel');
 [$s, , $hdr] = $A('POST', 'new.php?s=announcements', ['csrf' => $acsrf, 'title' => 'Welkom <b>', 'body' => "Hallo **allen** <script>alert(1)</script>\nZie #1185"]);
 check_same(303, $s, 'aankondiging aangemaakt');
@@ -129,7 +129,7 @@ check(str_contains($A('GET', $threadUrl)[1], 'href="section.php?s=announcements"
 [$s, $body] = $A('GET', $threadUrl);
 check_same(200, $s, 'thread laadt');
 check(str_contains($body, 'Welkom &lt;b&gt;') && !str_contains($body, '<script>alert'), 'escaping titel en bericht');
-check(preg_match('#<nav class="breadcrumb" aria-label="breadcrumb"><ol><li><a href="index\.php">Forum Magnum</a></li><li><a href="section\.php\?s=announcements">Aankondigingen</a></li><li class="truncate" aria-current="page"><span>Welkom &lt;b&gt;</span></li></ol></nav>#', $body) === 1, 'thread: Forum Magnum > sectie > titel, titel geëscaped');
+check(preg_match('#<nav class="breadcrumb" aria-label="breadcrumb"><ol><li><a href="index\.php">Forum Magnum</a></li><li><a href="section\.php\?s=announcements">Aankondigingen</a></li><li class="truncate" aria-current="page"><span title="Welkom &lt;b&gt;">Welkom &lt;b&gt;</span></li></ol></nav>#', $body) === 1, 'thread: Forum Magnum > sectie > titel, titel geëscaped');
 check(!str_contains($body, '<div class="bar"><h1>'), 'thread: geen h1-titel');
 check(str_contains($body, '<strong>allen</strong>') && str_contains($body, 'asclepius/index.php?open=1185'), 'opmaak en ticketlink');
 check(str_contains($body, '<span class="company-logo is-admin" role="img" aria-label="Koninklijke van Twist · Beheerder"') && str_contains($body, 'mask-image:url(&quot;assets/company/kvt.svg?v='), 'beheerder: gouden bedrijfslogo in posterblok');
@@ -225,10 +225,10 @@ check(str_contains($sectionHtml($body, 'work'), 'href="index.php?p_gen=3#sec-wor
 [$s, $body] = $U('GET', 'section.php?s=general');
 check_same(20, substr_count($body, '<li class="thread'), 'sectiepagina: 20 per pagina');
 check(str_contains($body, 'href="section.php?s=general&amp;p=2"') && !str_contains($body, 'Aankondigingen</a></h'), 'sectiepagina: alleen die lijst, eigen paginering');
-check(preg_match('#<nav class="breadcrumb" aria-label="breadcrumb"><ol><li><a href="index\.php">Forum Magnum</a></li><li class="truncate" aria-current="page"><span>Allgemeines</span></li></ol></nav>#', $body) === 1, 'sectiepagina (DE): Forum Magnum > Allgemeines, laatste item plat');
+check(preg_match('#<nav class="breadcrumb" aria-label="breadcrumb"><ol><li><a href="index\.php">Forum Magnum</a></li><li class="truncate" aria-current="page"><span title="Allgemeines">Allgemeines</span></li></ol></nav>#', $body) === 1, 'sectiepagina (DE): Forum Magnum > Allgemeines, laatste item plat');
 check(!str_contains($body, '<h1'), 'sectiepagina: geen h1');
 [$s, $ann] = $A('GET', 'section.php?s=announcements');
-check(preg_match('#<nav class="breadcrumb" aria-label="breadcrumb"><ol><li><a href="index\.php">Forum Magnum</a></li><li class="truncate" aria-current="page"><span>Aankondigingen</span></li></ol></nav>#', $ann) === 1, 'sectiepagina (NL): Forum Magnum > Aankondigingen');
+check(preg_match('#<nav class="breadcrumb" aria-label="breadcrumb"><ol><li><a href="index\.php">Forum Magnum</a></li><li class="truncate" aria-current="page"><span title="Aankondigingen">Aankondigingen</span></li></ol></nav>#', $ann) === 1, 'sectiepagina (NL): Forum Magnum > Aankondigingen');
 [$s, $body] = $U('GET', 'section.php?s=general&p=2');
 check_same(1, substr_count($body, '<li class="thread'), 'sectiepagina 2');
 preg_match('/href="(thread\.php\?id=\d+)">Onderwerp 1</', $body, $tm);
@@ -375,7 +375,7 @@ check(str_contains(fm_breadcrumb_html([[fm_section_label('announcements'), null]
 $GLOBALS['fmLang'] = 'nl';
 check(str_contains(fm_breadcrumb_html([[fm_section_label('general'), null]]), '>Algemeen</span>'), 'kruimelpad NL');
 $one = fm_breadcrumb_html([['Hoi', 'thread.php?id=9']]);
-check(str_contains($one, '<a href="index.php">Forum Magnum</a>') && str_contains($one, '>Hoi</span>') && !str_contains($one, 'thread.php?id=9'), 'thread Hoi: laatste item is platte tekst');
+check(str_contains($one, '<a href="index.php">Forum Magnum</a>') && str_contains($one, 'title="Hoi"') && str_contains($one, '>Hoi</span>') && !str_contains($one, 'thread.php?id=9'), 'thread Hoi: laatste item is platte tekst, met title');
 $GLOBALS['fmLang'] = $savedLang;
 
 finish('page_smoke');

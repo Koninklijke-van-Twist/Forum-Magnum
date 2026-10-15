@@ -139,7 +139,8 @@ function fm_section_block_html(string $section, string $email, int $page, int $p
 /**
  * Paginatitel als kruimelpad. Eerste item is altijd Forum Magnum (link naar de start).
  * Het laatste item is de huidige pagina (platte tekst); eerdere items met url zijn links.
- * Lange titels krijgen title="…" en class="truncate" zodat CSS ze afkapt.
+ * De huidige pagina (en langere tussenitems) krijgt title="…" zodat een afgekapte tekst
+ * volledig leesbaar blijft. class="truncate" markeert items die CSS mag inkorten.
  *
  * @param list<array{0:string,1:?string}> $trail
  */
@@ -152,7 +153,8 @@ function fm_breadcrumb_html(array $trail): string
         $label = (string) $label;
         $isLast = $i === $last;
         $clip = $isLast || mb_strlen($label) > 24;
-        $title = mb_strlen($label) > 24 ? ' title="' . h($label) . '"' : '';
+        // Ook korte huidige pagina: op een smal scherm kan die alsnog worden afgekapt.
+        $title = ($isLast || mb_strlen($label) > 24) ? ' title="' . h($label) . '"' : '';
         $html .= '<li' . ($clip ? ' class="truncate"' : '') . ($isLast ? ' aria-current="page"' : '') . '>';
         if (!$isLast && is_string($url) && $url !== '') {
             $html .= '<a href="' . h($url) . '"' . $title . '>' . h($label) . '</a>';
