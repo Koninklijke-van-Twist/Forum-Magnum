@@ -109,12 +109,155 @@ form.inline { display: inline; }
 .poster-id { display: flex; flex-direction: column; min-width: 0; }
 .poster-name { font-size: 1rem; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
 .poster-mail { color: var(--poster-fg); font-size: .72rem; overflow-wrap: anywhere; }
-.post-main { position: relative; padding: 12px 16px 0; min-width: 0; display: flex; flex-direction: column; background: linear-gradient(var(--card), var(--card)); }
+.post-main { position: relative; padding: 12px 16px 0; min-width: 0; display: flex; flex-direction: column; --post-bg: var(--card); background: linear-gradient(var(--post-bg), var(--post-bg)); }
 /* Voetregel onderaan het bericht: permalink links, datum/bewerkt rechts. */
-.post-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin: 10px -16px 0; padding: 4px 10px 5px; border-top: 1px solid var(--line); color: var(--muted); font-size: .78rem; }
+.post-foot { position: relative; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin: 10px -16px 0; padding: 4px 10px 5px; border-top: 1px solid var(--line); color: var(--muted); font-size: .78rem; }
 .post-link { color: var(--muted); text-decoration: none; }
 .post-link:hover { text-decoration: underline; }
 .post-when { text-align: right; }
+.post-foot > .post-ref, .post-foot > .post-when { position: relative; z-index: 1; }
+
+/* Herhaalde eindcijfers: verloop vanuit de linkerrand van de voetregel, achter het nummer,
+   uitvloeiend naar rechts. Brons/zilver/goud/diamant hebben een diagonale glans die alleen
+   bij hover (of toetsenbordfocus) zacht beweegt. Zes of meer: scrollende regenboog, zonder glans. */
+.post-foot.has-gets { align-items: center; border-bottom-right-radius: 9px; }
+.post-foot.has-gets:not(.gets-nice) .post-when {
+    background: linear-gradient(90deg, transparent, var(--post-bg) 16px);
+    padding-left: 12px;
+}
+.gets-fx { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; border-radius: inherit; }
+.post-foot.gets-dubs .gets-fx {
+    background: linear-gradient(90deg, rgba(156, 98, 48, .55) 0%, rgba(186, 128, 74, .32) 8%, rgba(198, 154, 108, .12) 14%, transparent 20%);
+}
+.post-foot.gets-trips .gets-fx {
+    background: linear-gradient(90deg, rgba(132, 144, 158, .58) 0%, rgba(176, 186, 198, .34) 14%, rgba(214, 220, 228, .12) 28%, transparent 42%);
+}
+.post-foot.gets-quads .gets-fx {
+    background: linear-gradient(90deg, rgba(196, 146, 32, .58) 0%, rgba(224, 180, 62, .36) 18%, rgba(240, 214, 130, .14) 36%, transparent 54%);
+}
+.post-foot.gets-quints .gets-fx {
+    background-image:
+        radial-gradient(circle at 12% 30%, rgba(255, 255, 255, .95) 0 1px, transparent 1.7px),
+        radial-gradient(circle at 22% 72%, rgba(255, 255, 255, .9) 0 1.1px, transparent 1.8px),
+        radial-gradient(circle at 33% 28%, rgba(210, 240, 255, .95) 0 1px, transparent 1.6px),
+        radial-gradient(circle at 44% 68%, rgba(255, 255, 255, .85) 0 1px, transparent 1.6px),
+        radial-gradient(circle at 54% 36%, rgba(186, 228, 255, .95) 0 1.1px, transparent 1.8px),
+        linear-gradient(90deg, rgba(146, 210, 238, .62) 0%, rgba(196, 232, 250, .36) 20%, rgba(228, 246, 255, .14) 42%, transparent 66%);
+    background-repeat: no-repeat;
+}
+.post-foot.gets-rainbow .gets-fx {
+    background-image: linear-gradient(90deg,
+        rgba(224, 70, 86, .50) 0%,
+        rgba(236, 138, 40, .48) 16%,
+        rgba(228, 196, 48, .46) 32%,
+        rgba(46, 176, 112, .46) 48%,
+        rgba(40, 148, 214, .50) 64%,
+        rgba(124, 84, 214, .50) 80%,
+        rgba(224, 70, 86, .50) 100%);
+    background-size: 200% 100%;
+    animation: gets-rainbow 8s linear infinite;
+    -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 10%, transparent 68%);
+    mask-image: linear-gradient(90deg, #000 0%, #000 10%, transparent 68%);
+}
+.post-foot.gets-dubs { box-shadow: inset 3px 0 0 rgba(138, 82, 38, .9); }
+.post-foot.gets-trips { box-shadow: inset 3px 0 0 rgba(120, 132, 146, .95); }
+.post-foot.gets-quads { box-shadow: inset 3px 0 0 rgba(176, 128, 24, .95); }
+.post-foot.gets-quints { box-shadow: inset 3px 0 0 rgba(96, 176, 210, .95); }
+.post-foot.gets-dubs .post-link { color: #4a3018; font-weight: 700; }
+.post-foot.gets-trips .post-link { color: #2c3540; font-weight: 700; }
+.post-foot.gets-quads .post-link { color: #5c4308; font-weight: 700; }
+.post-foot.gets-quints .post-link { color: #0e4a64; font-weight: 700; }
+.post-foot.gets-rainbow .post-link { color: #1d2733; font-weight: 700; text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 1px 0 #fff; }
+.post-foot.gets-shine .gets-fx::after {
+    content: "";
+    position: absolute;
+    top: -80%;
+    left: 6%;
+    width: 14px;
+    height: 260%;
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, .2) 35%, rgba(255, 255, 255, .82) 50%, rgba(255, 255, 255, .2) 65%, transparent 100%);
+    transform: translateX(0) rotate(22deg);
+    pointer-events: none;
+}
+.post-foot.gets-shine:hover .gets-fx::after,
+.post-foot.gets-shine:focus-within .gets-fx::after { animation: gets-shine 2.4s ease-in-out infinite; }
+.post-foot.gets-satanic { box-shadow: inset 3px 0 0 rgba(92, 12, 18, .96), -3px 0 8px -4px rgba(120, 12, 18, .45); }
+.post-foot.gets-satanic .gets-fx::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(74, 8, 12, .38) 0%, rgba(120, 16, 22, .14) 16%, transparent 38%);
+    pointer-events: none;
+}
+.post-foot.gets-satanic .post-link { color: #6e1218; }
+.post-foot.gets-holy {
+    box-shadow: inset 2px 0 0 rgba(255, 255, 255, .98), 0 0 10px rgba(255, 255, 255, .95), 0 3px 8px -2px rgba(255, 250, 235, .9);
+}
+.post-foot.gets-holy .gets-fx::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(255, 255, 255, .78) 0%, rgba(255, 255, 255, .32) 22%, transparent 50%);
+    pointer-events: none;
+}
+.post-foot.gets-holy .post-link { text-shadow: 0 0 6px #fff, 0 0 2px #fff; }
+.post-ref[data-gets] { border-radius: 4px; }
+.gets-tip {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 7px);
+    z-index: 6;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: #14202e;
+    color: #fff;
+    font-size: .8rem;
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(3px);
+    transition: opacity .12s ease, transform .12s ease;
+    box-shadow: 0 4px 14px rgba(20, 32, 46, .22);
+}
+.gets-tip::after {
+    content: "";
+    position: absolute;
+    left: 10px;
+    top: 100%;
+    border: 5px solid transparent;
+    border-top-color: #14202e;
+}
+.post-ref:hover .gets-tip,
+.post-ref:focus-within .gets-tip,
+.post-ref.gets-open .gets-tip { opacity: 1; transform: translateY(0); }
+@keyframes gets-shine {
+    0%, 100% { transform: translateX(0) rotate(22deg); opacity: .55; }
+    50% { transform: translateX(16px) rotate(22deg); opacity: 1; }
+}
+@keyframes gets-rainbow {
+    from { background-position: 0% 0; }
+    to { background-position: 100% 0; }
+}
+@media (max-width: 700px) {
+    .post-foot.has-gets { border-bottom-left-radius: 9px; border-bottom-right-radius: 9px; }
+}
+@media (pointer: coarse) {
+    .post-ref[data-gets] { display: inline-flex; align-items: center; min-height: 44px; padding: 0 4px; margin: 0 -4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .post-foot.gets-rainbow .gets-fx { animation: none; background-position: 0 0; }
+    .post-foot.gets-shine:hover .gets-fx::after,
+    .post-foot.gets-shine:focus-within .gets-fx::after { animation: none; }
+    .gets-tip { transition: none; }
+}
+@media (forced-colors: active) {
+    .gets-fx { display: none; }
+    .post-foot.has-gets { box-shadow: none; }
+    .post-foot.has-gets .post-link { color: LinkText; font-weight: 700; text-shadow: none; }
+}
+
 .edited { font-style: italic; }
 .post-body { overflow-wrap: anywhere; flex: 1; }
 .post-body.deleted { color: var(--muted); font-style: italic; }
@@ -180,7 +323,7 @@ form.inline { display: inline; }
     .post-menu { visibility: hidden; }
     .post:hover .post-menu, .post-menu[open], .post-menu:focus-within { visibility: visible; }
 }
-.post.is-deleted .post-main { background: #fdecec; }
+.post.is-deleted .post-main { --post-bg: #fdecec; background: var(--post-bg); }
 .post-body.deleted { color: #8a1c1c; font-style: italic; }
 
 /* Startpagina: drie threadlijsten onder elkaar */

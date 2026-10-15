@@ -583,3 +583,37 @@ document.addEventListener('click', function (e) {
         if (page) { highlight(page); }
     });
 })();
+
+/* Tooltip bij herhaalde eindcijfers: hover/focus via CSS. Op een touchscherm toont de eerste tik
+   de tooltip (de permalink volgt bij de tweede); toetsenbord en muis blijven een gewone link. */
+(function () {
+    'use strict';
+    var pointer = 'mouse';
+    var openRef = null;
+    function closeGets() {
+        if (openRef) { openRef.classList.remove('gets-open'); }
+        openRef = null;
+    }
+    document.addEventListener('pointerdown', function (e) {
+        pointer = e.pointerType || 'mouse';
+    }, true);
+    document.addEventListener('touchstart', function () { pointer = 'touch'; }, { passive: true, capture: true });
+    document.addEventListener('click', function (e) {
+        var ref = e.target.closest && e.target.closest('.post-ref[data-gets]');
+        if (!ref) { closeGets(); return; }
+        // detail 0 = toetsenbord. Alleen een echte aanraking onderschept de eerste tik.
+        if (pointer !== 'touch' || e.detail === 0) { return; }
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) { return; }
+        if (ref.classList.contains('gets-open')) { return; }
+        e.preventDefault();
+        closeGets();
+        ref.classList.add('gets-open');
+        openRef = ref;
+    });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') { closeGets(); }
+    });
+    document.addEventListener('scroll', function () {
+        if (openRef) { closeGets(); }
+    }, true);
+})();
