@@ -24,7 +24,9 @@ if ($path === '' || !is_file($path)) {
 
 header('Content-Type: text/html; charset=utf-8');
 if (!$part) {
-    fm_header((string) $attachment['original_name']);
+    $trail = fm_attachment_trail($attachment);
+    fm_header((string) $attachment['original_name'], $trail);
+    echo '<div class="bar">' . fm_breadcrumb_html($trail) . '</div>';
 }
 echo fm_attachment_preview_html($attachment, $path);
 if (!$part) {

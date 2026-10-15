@@ -47,7 +47,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
 $back = fm_section_page_url($section);
 fm_header(fm_t('new_thread'), [[fm_section_label($section), $back], [fm_t('new_thread'), null]]);
-echo '<div class="bar"><h1>' . h(fm_section_label($section)) . ' · ' . h(fm_t('new_thread')) . '</h1></div>';
+echo '<div class="bar">' . fm_breadcrumb_html([[fm_section_label($section), $back], [fm_t('new_thread'), null]]) . '</div>';
 if ($error !== '') {
     echo '<p class="flash error">' . h($error) . '</p>';
 }

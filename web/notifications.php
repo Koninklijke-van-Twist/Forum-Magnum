@@ -10,7 +10,7 @@ if (!isset($_GET['tab']) && $counts['mentions'] === 0 && $counts['threads'] > 0)
     $tab = 'posts';
 }
 fm_header(fm_t('notifications'), [[fm_t('notifications'), null]]);
-echo '<nav class="tabs">';
+echo '<div class="bar">' . fm_breadcrumb_html([[fm_t('notifications'), null]]) . '</div><nav class="tabs">';
 foreach (['mentions' => ['tab_mentions', $counts['mentions']], 'posts' => ['tab_posts', $counts['threads']]] as $key => [$label, $n]) {
     echo '<a href="notifications.php?tab=' . $key . '"' . ($tab === $key ? ' class="active" aria-current="page"' : '') . '>' . h(fm_t($label))
         . ($n > 0 ? ' <span class="badge">' . $n . '</span>' : '') . '</a>';
