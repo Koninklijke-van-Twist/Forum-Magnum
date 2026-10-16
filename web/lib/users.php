@@ -182,13 +182,25 @@ function fm_name_from_email(string $email): string
 }
 
 /**
+ * Request-cache van gebruikersinfo (gedeeld door fm_user_info en fm_prime_user_info).
+ *
+ * @return array<string, array{email:string,graph_id:string,name:string,job_title:string,department:string,company:string}>
+ */
+function &fm_user_info_cache(): array
+{
+    static $memo = [];
+
+    return $memo;
+}
+
+/**
  * Gebruikersinfo uit de cache; ververst via Graph als de cache verlopen is.
  *
  * @return array{email:string,graph_id:string,name:string,job_title:string,department:string,company:string}
  */
 function fm_user_info(string $email, bool $allowFetch = true): array
 {
-    static $memo = [];
+    $memo = &fm_user_info_cache();
     $email = strtolower(trim($email));
     if (isset($memo[$email])) {
         return $memo[$email];
@@ -210,16 +222,90 @@ function fm_user_info(string $email, bool $allowFetch = true): array
             ->execute([$email, $row['graph_id'], $row['name'], $row['job_title'], $row['department'], $row['company'], time()]);
     }
     $row ??= ['email' => $email, 'graph_id' => '', 'name' => '', 'job_title' => '', 'department' => '', 'company' => ''];
-    $info = [
-        'email' => $email,
-        'graph_id' => (string) $row['graph_id'],
-        'name' => trim((string) $row['name']) !== '' ? (string) $row['name'] : fm_session_name_for($email),
-        'job_title' => (string) $row['job_title'],
-        'department' => (string) $row['department'],
-        'company' => trim((string) $row['company']) !== '' ? (string) $row['company'] : fm_company_from_email($email),
-    ];
 
-    return $memo[$email] = $info;
+    return $memo[$email] = fm_user_info_assemble($email, $row, null);
+}
+
+/**
+ * Zelfde resultaat als fm_user_info($email, false) voor een hele lijst, in één of twee queries
+ * (directory + known_users), zodat een threadlijst geen query per rij doet.
+ *
+ * @param list<string> $emails
+ */
+function fm_prime_user_info(array $emails): void
+{
+    $memo = &fm_user_info_cache();
+    $need = [];
+    foreach ($emails as $email) {
+        $email = strtolower(trim((string) $email));
+        if ($email === '' || isset($memo[$email])) {
+            continue;
+        }
+        $need[$email] = true;
+    }
+    if ($need === []) {
+        return;
+    }
+    $list = array_keys($need);
+    $placeholders = implode(',', array_fill(0, count($list), '?'));
+    $st = fm_db()->prepare('SELECT * FROM directory WHERE email IN (' . $placeholders . ')');
+    $st->execute($list);
+    $rows = [];
+    foreach ($st->fetchAll() as $row) {
+        $rows[strtolower((string) $row['email'])] = $row;
+    }
+    $missingName = [];
+    foreach ($list as $email) {
+        if (trim((string) ($rows[$email]['name'] ?? '')) === '') {
+            $missingName[] = $email;
+        }
+    }
+    $known = [];
+    if ($missingName !== []) {
+        $placeholders = implode(',', array_fill(0, count($missingName), '?'));
+        $st = fm_db()->prepare('SELECT email, name FROM known_users WHERE email IN (' . $placeholders . ')');
+        $st->execute($missingName);
+        foreach ($st->fetchAll() as $row) {
+            $known[strtolower((string) $row['email'])] = (string) $row['name'];
+        }
+    }
+    foreach ($list as $email) {
+        $row = $rows[$email] ?? null;
+        $fallback = trim((string) ($row['name'] ?? '')) === '' ? ($known[$email] ?? '') : null;
+        $memo[$email] = fm_user_info_assemble($email, $row, $fallback);
+    }
+}
+
+/**
+ * Naam, bedrijf en afdeling uit een directory-rij.
+ * $fallbackName null = known_users zelf opzoeken (één gebruiker); een string = al opgehaald (batch).
+ *
+ * @param array<string,mixed>|null $row
+ * @return array{email:string,graph_id:string,name:string,job_title:string,department:string,company:string}
+ */
+function fm_user_info_assemble(string $email, ?array $row, ?string $fallbackName): array
+{
+    $row ??= ['graph_id' => '', 'name' => '', 'job_title' => '', 'department' => '', 'company' => ''];
+    $name = trim((string) ($row['name'] ?? ''));
+    if ($name === '') {
+        $session = $_SESSION['user'] ?? [];
+        if (is_array($session) && strtolower((string) ($session['email'] ?? '')) === $email && trim((string) ($session['name'] ?? '')) !== '') {
+            $name = trim((string) $session['name']);
+        } elseif ($fallbackName === null) {
+            $name = fm_session_name_for($email);
+        } else {
+            $name = trim($fallbackName) !== '' ? trim($fallbackName) : fm_name_from_email($email);
+        }
+    }
+
+    return [
+        'email' => $email,
+        'graph_id' => (string) ($row['graph_id'] ?? ''),
+        'name' => $name,
+        'job_title' => (string) ($row['job_title'] ?? ''),
+        'department' => (string) ($row['department'] ?? ''),
+        'company' => trim((string) ($row['company'] ?? '')) !== '' ? (string) $row['company'] : fm_company_from_email($email),
+    ];
 }
 
 /** Naam uit de login-sessie (alleen voor de ingelogde gebruiker), anders afgeleid uit het e-mailadres. */

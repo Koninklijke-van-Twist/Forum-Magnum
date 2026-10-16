@@ -350,7 +350,11 @@ $U('POST', $threadUrl, ['action' => 'reply', 'csrf' => $csrf, 'body' => 'Nog een
 [$s, $body] = $A('GET', 'notifications.php?tab=posts');
 check(str_contains($body, 'Nieuwe berichten in Welkom &lt;b&gt;'), 'tab berichten: thread waar je gepost hebt');
 [$s, $body] = $A('GET', 'index.php');
-check(str_contains($sectionHtml($body, 'general'), '<li class="thread is-unread"><a class="thread-title" href="thread.php?id='), 'ongelezen thread gemarkeerd');
+$genUnread = $sectionHtml($body, 'general');
+check(str_contains($genUnread, 'class="thread is-unread"') && str_contains($genUnread, '<a class="thread-title" href="thread.php?id='), 'ongelezen thread gemarkeerd');
+$annList = $sectionHtml($body, 'announcements');
+check(preg_match('/<button type="button" class="thread-maker" data-poster="tfalken@kvt.nl"[^>]*>.*?<span class="thread-maker-name">Tfalken<\/span>.*?class="thread-title".*?Anna Jansen,/s', $annList) === 1, 'startpagina: profielbox van de maker, meta van de laatste poster');
+check(substr_count($annList, 'class="thread-maker"') === substr_count($annList, '<li class="thread'), 'elke aankondiging een makerbox');
 [$s, $body] = $A('GET', $mentionThread);
 check(str_contains($body, 'class="post first-unread is-unread"'), 'ongelezen bericht: andere omlijning');
 check(str_contains($body, 'class="mention mention-self"'), 'eigen naam gemarkeerd in bericht');

@@ -192,25 +192,55 @@ function fm_attachment_trail(array $attachment): array
     return $trail;
 }
 
-/** Threadlijst (laatste bericht eerst) als HTML. */
+/** Threadlijst (laatste bericht eerst) als HTML. Links de maker, niet de laatste poster. */
 function fm_thread_list_html(array $threads): string
 {
     if ($threads === []) {
         return '<p class="empty">' . h(fm_t('no_threads')) . '</p>';
     }
+    $emails = [];
+    foreach ($threads as $t) {
+        $emails[] = (string) ($t['author'] ?? '');
+        $emails[] = (string) ($t['last_author'] ?? '');
+    }
+    fm_prime_user_info($emails);
     $html = '<ol class="threads">';
     foreach ($threads as $t) {
         $unread = (int) $t['unread'];
+        $author = strtolower(trim((string) ($t['author'] ?? '')));
+        $maker = fm_user_info($author, false);
         $last = fm_user_info((string) $t['last_author'], false);
         $html .= '<li class="thread' . ($unread > 0 ? ' is-unread' : '') . '">'
+            . fm_thread_maker_html($author, $maker)
+            . '<div class="thread-body">'
             . '<a class="thread-title" href="' . h(fm_thread_url((int) $t['id'])) . '">' . h((string) $t['title']) . '</a>'
             . ($unread > 0 ? '<span class="badge">' . h(fm_t('unread', $unread)) . '</span>' : '')
             . '<span class="meta"><span title="' . h(fm_t('replies')) . '">💬 ' . max(0, (int) $t['post_count'] - 1) . '</span>'
             . ' · <a href="' . h('post.php?id=' . (int) $t['last_post_id']) . '" title="' . h(fm_t('last_post')) . '">' . h($last['name']) . ', ' . h(fm_format_time((int) $t['last_post_at'])) . '</a></span>'
-            . '</li>';
+            . '</div></li>';
     }
 
     return $html . '</ol>';
+}
+
+/**
+ * Compacte profielbox van de threadmaker: afdelingskleur, vierkante avatar, naam eronder.
+ * Avatar en naam openen het profiel (data-poster), zoals in het posterblok bij berichten.
+ *
+ * @param array{name?:string,department?:string} $info
+ */
+function fm_thread_maker_html(string $email, array $info): string
+{
+    $color = fm_department_color((string) ($info['department'] ?? ''));
+    $style = '--poster-bg:' . $color['bg'] . ';--poster-fg:' . $color['fg'] . ';--poster-line:' . $color['line'];
+    $name = (string) ($info['name'] ?? '');
+    $avatar = filter_var($email, FILTER_VALIDATE_EMAIL)
+        ? '<img class="thread-maker-avatar" src="' . h(fm_avatar_url($email)) . '" alt="" width="50" height="50" loading="lazy">'
+        : '';
+
+    return '<button type="button" class="thread-maker" data-poster="' . h($email) . '" style="' . h($style) . '" aria-label="' . h(fm_t('profile', $name)) . '">'
+        . $avatar
+        . '<span class="thread-maker-name">' . h($name) . '</span></button>';
 }
 
 function fm_thread_url(int $threadId, ?int $page = null, int $anchorPost = 0): string

@@ -109,6 +109,43 @@ fm_set_lang('Anna@kvt.nl', 'de');
 check_same('de', fm_get_lang('anna@kvt.nl'), 'taal opgeslagen');
 check_throws(fn () => fm_set_lang('anna@kvt.nl', 'xx'), InvalidArgumentException::class, 'onbekende taal');
 
+// Profielbox in de threadlijst: maker (eerste poster), niet de laatste, zonder query per rij.
+fm_db()->prepare('INSERT OR REPLACE INTO directory (email, graph_id, name, job_title, department, company, fetched_at) VALUES (?,?,?,?,?,?,?)')
+    ->execute(['anna@kvt.nl', '', 'Anna <Maker>', '', 'Service', 'Koninklijke van Twist', time()]);
+fm_db()->prepare('INSERT OR REPLACE INTO directory (email, graph_id, name, job_title, department, company, fetched_at) VALUES (?,?,?,?,?,?,?)')
+    ->execute(['bob@kvt.nl', '', 'Bob Laatste', '', 'ICT', 'KVT Germany', time()]);
+class FmQueryStatement extends PDOStatement
+{
+    public function execute(?array $params = null): bool
+    {
+        $GLOBALS['fmSql'][] = $this->queryString;
+
+        return $params === null ? parent::execute() : parent::execute($params);
+    }
+}
+$GLOBALS['fmSql'] = [];
+fm_db()->setAttribute(PDO::ATTR_STATEMENT_CLASS, [FmQueryStatement::class]);
+$workPage = fm_list_threads('work', 'anna@kvt.nl', 1);
+$before = count($GLOBALS['fmSql']);
+$listed = fm_thread_list_html($workPage);
+$queries = array_slice($GLOBALS['fmSql'], $before);
+check_same(20, substr_count($listed, 'class="thread-maker"'), 'elke rij op de pagina een makerbox');
+check_same(1, count($queries), 'namen van een volle pagina in één query');
+check(str_contains($queries[0] ?? '', 'FROM directory'), 'batch leest directory');
+check(count(array_filter($queries, static fn ($sql) => str_contains($sql, 'known_users'))) === 0, 'bekende namen slaan known_users over');
+$again = count($GLOBALS['fmSql']);
+fm_thread_list_html($workPage);
+check_same($again, count($GLOBALS['fmSql']), 'tweede render komt uit de request-cache');
+$makerRow = array_values(array_filter(fm_list_threads('general', 'anna@kvt.nl', 1), static fn ($row) => (int) $row['id'] === $a));
+$card = fm_thread_list_html($makerRow);
+$serviceBg = fm_department_color('Service')['bg'];
+check(str_contains($card, 'data-poster="anna@kvt.nl"') && !str_contains($card, 'data-poster="bob@kvt.nl"'), 'box hoort bij de maker, niet de laatste poster');
+check(str_contains($card, 'class="thread-maker-name">Anna &lt;Maker&gt;<') && str_contains($card, 'avatar.php?e=anna%40kvt.nl'), 'naam en avatar van de maker, ge-escaped');
+check(str_contains($card, '--poster-bg:' . $serviceBg), 'achtergrond is de afdelingskleur');
+check(str_contains($card, '>Bob Laatste, ') && str_contains($card, '💬 1'), 'meta blijft laatste poster en aantal reacties');
+check(strpos($card, 'class="thread-maker"') < strpos($card, 'class="thread-title"'), 'box staat links van de titel');
+check(str_contains($card, 'border-radius') === false, 'afronding zit in CSS, niet inline');
+
 // Schema-versie.
 check_same(FM_SCHEMA_VERSION, (int) fm_db()->query('PRAGMA user_version')->fetchColumn(), 'schemaversie gezet');
 fm_migrate(fm_db());
