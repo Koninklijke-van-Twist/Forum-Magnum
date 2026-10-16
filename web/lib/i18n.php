@@ -81,6 +81,7 @@ function fm_strings(): array
             'link_post' => 'Link naar dit bericht',
             'today' => 'vandaag %s',
             'yesterday' => 'gisteren %s',
+            'youtube_play' => 'YouTube-video afspelen',
         ],
         'fr' => [
             'copy_link' => 'Copier le lien',
@@ -150,6 +151,7 @@ function fm_strings(): array
             'link_post' => 'Lien vers ce message',
             'today' => 'aujourd’hui %s',
             'yesterday' => 'hier %s',
+            'youtube_play' => 'Lire la vidéo YouTube',
         ],
         'de' => [
             'copy_link' => 'Link kopieren',
@@ -219,6 +221,7 @@ function fm_strings(): array
             'link_post' => 'Link zu dieser Nachricht',
             'today' => 'heute %s',
             'yesterday' => 'gestern %s',
+            'youtube_play' => 'YouTube-Video abspielen',
         ],
         'en' => [
             'copy_link' => 'Copy link',
@@ -288,6 +291,7 @@ function fm_strings(): array
             'link_post' => 'Link to this message',
             'today' => 'today %s',
             'yesterday' => 'yesterday %s',
+            'youtube_play' => 'Play YouTube video',
         ],
     ];
 }

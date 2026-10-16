@@ -617,3 +617,30 @@ document.addEventListener('click', function (e) {
         if (openRef) { closeGets(); }
     }, true);
 })();
+
+/* YouTube: thumbnail tot een klik. Het iframe komt alleen uit de gevalideerde id, nooit uit een URL in de pagina. */
+(function () {
+    'use strict';
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest && e.target.closest('button.yt-facade');
+        if (!btn || btn.disabled) { return; }
+        var id = btn.getAttribute('data-yt-id') || '';
+        if (!/^[A-Za-z0-9_-]{11}$/.test(id)) { return; }
+        var src = 'https://www.youtube-nocookie.com/embed/' + id + '?autoplay=1';
+        var start = btn.getAttribute('data-yt-start');
+        if (start !== null && /^\d{1,6}$/.test(start)) {
+            var secs = parseInt(start, 10);
+            if (secs <= 864000) { src += '&start=' + secs; }
+        }
+        var frame = document.createElement('iframe');
+        frame.className = 'yt-frame';
+        frame.src = src;
+        frame.title = btn.getAttribute('aria-label') || 'YouTube';
+        frame.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen');
+        frame.setAttribute('allowfullscreen', '');
+        frame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+        var box = btn.closest('.yt-embed');
+        if (box) { box.replaceChild(frame, btn); } else { btn.replaceWith(frame); }
+        try { frame.focus(); } catch (err) { /* cross-origin frame */ }
+    });
+})();

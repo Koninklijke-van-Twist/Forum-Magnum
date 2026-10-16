@@ -438,13 +438,157 @@ function buildMessageAnchorHtml(string $href, string $labelHtml, bool $forEmail,
     return '<a href="' . $safeHref . '"' . $target . '>' . $labelHtml . '</a>';
 }
 
+/** YouTube-video-id: precies 11 tekens, zelfde regel als de client. */
+function fm_youtube_id_ok(string $id): bool
+{
+    return preg_match('/^[A-Za-z0-9_-]{11}$/', $id) === 1;
+}
+
+/**
+ * Starttijd uit &t= / ?t= (seconden, of 1h2m3s / 1m30s / 1m30). Ongeldig → null.
+ */
+function fm_youtube_start_seconds(string $raw): ?int
+{
+    $raw = strtolower(trim($raw));
+    if ($raw === '' || strlen($raw) > 16) {
+        return null;
+    }
+    if (preg_match('/^\d{1,9}$/', $raw) === 1) {
+        $seconds = (int) $raw;
+    } elseif (preg_match('/[hms]/', $raw) === 1
+        && preg_match('/^(?:(\d{1,4})h)?(?:(\d{1,4})m)?(?:(\d{1,4})s)?$/', $raw, $m) === 1) {
+        $seconds = ((int) ($m[1] ?? 0)) * 3600 + ((int) ($m[2] ?? 0)) * 60 + ((int) ($m[3] ?? 0));
+    } elseif (preg_match('/^(?:(\d{1,4})h)?(\d{1,4})m(\d{1,4})$/', $raw, $m) === 1) {
+        $seconds = ((int) ($m[1] ?? 0)) * 3600 + ((int) $m[2]) * 60 + (int) $m[3];
+    } else {
+        return null;
+    }
+
+    return $seconds <= 864000 ? $seconds : null;
+}
+
+/**
+ * Kale YouTube-URL → video-id en optionele start, of null.
+ * Alleen watch?v=, youtu.be/ en /shorts/ op youtube.com (www/m) of youtu.be.
+ * De id wordt strikt gecontroleerd; de oorspronkelijke URL komt niet in de HTML.
+ *
+ * @return array{id: string, start: ?int}|null
+ */
+function fm_youtube_embed_target(string $url): ?array
+{
+    $url = trim(html_entity_decode($url, ENT_QUOTES, 'UTF-8'));
+    if ($url === '' || preg_match('/[\x00-\x1f\x7f\s]/', $url) === 1) {
+        return null;
+    }
+    if (!preg_match('#^https?://#i', $url)) {
+        $url = 'https://' . $url;
+    }
+
+    $parts = parse_url($url);
+    if (!is_array($parts) || isset($parts['user']) || isset($parts['pass'])) {
+        return null;
+    }
+    $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+    if (!in_array($scheme, ['http', 'https'], true)) {
+        return null;
+    }
+    $port = $parts['port'] ?? null;
+    if ($port !== null && !in_array((int) $port, [80, 443], true)) {
+        return null;
+    }
+
+    $host = strtolower(rtrim((string) ($parts['host'] ?? ''), '.'));
+    $path = rtrim((string) ($parts['path'] ?? ''), '/');
+    $id = '';
+    if (in_array($host, ['youtube.com', 'www.youtube.com', 'm.youtube.com'], true)) {
+        if (preg_match('#^/watch$#i', $path) === 1) {
+            $query = [];
+            parse_str((string) ($parts['query'] ?? ''), $query);
+            $v = $query['v'] ?? null;
+            $id = is_string($v) ? $v : '';
+        } elseif (preg_match('#^/shorts/([A-Za-z0-9_-]{11})$#i', $path, $m) === 1) {
+            $id = $m[1];
+        } else {
+            return null;
+        }
+    } elseif (in_array($host, ['youtu.be', 'www.youtu.be', 'm.youtu.be'], true)) {
+        if (preg_match('#^/([A-Za-z0-9_-]{11})$#', $path, $m) === 1) {
+            $id = $m[1];
+        } else {
+            return null;
+        }
+    } else {
+        return null;
+    }
+    if (!fm_youtube_id_ok($id)) {
+        return null;
+    }
+
+    $start = null;
+    $query = [];
+    parse_str((string) ($parts['query'] ?? ''), $query);
+    $t = $query['t'] ?? null;
+    if (is_string($t) && $t !== '') {
+        $start = fm_youtube_start_seconds($t);
+    }
+
+    return ['id' => $id, 'start' => $start];
+}
+
+/**
+ * Klik-om-te-laden: alleen een thumbnail en een knop. Geen iframe; de client
+ * bouwt die na een klik uit data-yt-id (en data-yt-start). Ruwe iframes in de
+ * berichttekst blijven ge-escaped.
+ */
+function fm_youtube_facade_html(string $id, ?int $start): string
+{
+    if (!fm_youtube_id_ok($id) || ($start !== null && ($start < 0 || $start > 864000))) {
+        return '';
+    }
+    $startAttr = $start !== null ? ' data-yt-start="' . $start . '"' : '';
+
+    return '<div class="yt-embed"><button type="button" class="yt-facade" data-yt-id="' . h($id) . '"'
+        . $startAttr . ' aria-label="' . h(fm_t('youtube_play')) . '">'
+        . '<img alt="" src="https://i.ytimg.com/vi/' . h($id) . '/hqdefault.jpg" width="480" height="360">'
+        . '<span class="yt-play" aria-hidden="true"></span>'
+        . '</button></div>';
+}
+
+/**
+ * @return array{html: string, suffix: string}|null
+ */
+function fm_try_youtube_bare_embed(string $url, string $suffix, bool $forEmail): ?array
+{
+    if ($forEmail) {
+        return null;
+    }
+    // Een afsluitende _ hoort soms bij de video-id (die wordt anders als leesteken afgeknipt).
+    $extra = strspn($suffix, '_');
+    for ($i = 0; $i <= $extra; $i++) {
+        $try = $i === 0 ? $url : $url . str_repeat('_', $i);
+        $target = fm_youtube_embed_target($try);
+        if ($target === null) {
+            continue;
+        }
+        $html = fm_youtube_facade_html($target['id'], $target['start']);
+        if ($html === '') {
+            return null;
+        }
+
+        return ['html' => $html, 'suffix' => substr($suffix, $i)];
+    }
+
+    return null;
+}
+
 /**
  * Renders one line of inline message text to safe HTML.
  *
  * Tokenized so links are never matched inside generated HTML:
- *  1. inline code, markdown links, bare URLs, e-mail addresses and phone
- *     numbers are pulled out of the RAW text and replaced by placeholders
- *     (their HTML is built and escaped individually);
+ *  1. inline code, markdown links, bare URLs (een kale YouTube-URL wordt een
+ *     embed-facade, een expliciete markdown-link blijft een gewone link),
+ *     e-mail addresses and phone numbers are pulled out of the RAW text and
+ *     replaced by placeholders (their HTML is built and escaped individually);
  *  2. the remaining text is HTML-escaped and gets bold/italic/shortcut markup;
  *  3. the placeholders are put back.
  */
@@ -476,20 +620,41 @@ function renderMessageInlineHtml(string $text, bool $forEmail = false): string
         $work
     ) ?? $work;
 
-    // 1b. Bare http(s):// and www. URLs.
+    // 1b. Bare http(s):// and www. URLs. Een kale YouTube-URL wordt een block-embed.
+    $renderBareUrl = static function (string $url, string $suffix) use ($forEmail, $store): string {
+        $embed = fm_try_youtube_bare_embed($url, $suffix, $forEmail);
+        if ($embed !== null) {
+            return $store($embed['html']) . $embed['suffix'];
+        }
+
+        $href = str_starts_with(strtolower($url), 'www.') ? 'https://' . $url : $url;
+        $ticketId = extractAsclepiusTicketIdFromUrl($href);
+        $labelHtml = $ticketId > 0 ? h(formatTicketRefLabel($ticketId)) : h($url);
+
+        return $store(buildMessageAnchorHtml($href, $labelHtml, $forEmail)) . $suffix;
+    };
     $work = preg_replace_callback(
         '~(?<![\w.@/-])(?:https?://|www\.)[^\s<>\x1A]+~i',
-        static function (array $match) use ($forEmail, $store): string {
+        static function (array $match) use ($renderBareUrl): string {
             [$url, $suffix] = splitMessageUrlTrailingPunctuation((string) $match[0]);
             if (preg_match('~^(?:https?://|www\.)[^\s]+$~i', $url) !== 1 || preg_match('~^(?:https?://|www\.)$~i', $url) === 1) {
                 return (string) $match[0];
             }
 
-            $href = str_starts_with(strtolower($url), 'www.') ? 'https://' . $url : $url;
-            $ticketId = extractAsclepiusTicketIdFromUrl($href);
-            $labelHtml = $ticketId > 0 ? h(formatTicketRefLabel($ticketId)) : h($url);
+            return $renderBareUrl($url, $suffix);
+        },
+        $work
+    ) ?? $work;
 
-            return $store(buildMessageAnchorHtml($href, $labelHtml, $forEmail)) . $suffix;
+    // 1b-yt. Kale YouTube-URL zonder schema (youtube.com, m.youtube.com, youtu.be).
+    // Alleen een geldige video-id wordt een embed; de rest blijft platte tekst.
+    $work = preg_replace_callback(
+        '~(?<![\w.@/-])(?:(?:m\.)?youtube\.com|(?:m\.)?youtu\.be)/[^\s<>\x1A]+~i',
+        static function (array $match) use ($forEmail, $store): string {
+            [$url, $suffix] = splitMessageUrlTrailingPunctuation((string) $match[0]);
+            $embed = fm_try_youtube_bare_embed($url, $suffix, $forEmail);
+
+            return $embed === null ? (string) $match[0] : $store($embed['html']) . $embed['suffix'];
         },
         $work
     ) ?? $work;

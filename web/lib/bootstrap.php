@@ -43,6 +43,7 @@ fm_touch_user($fmUser, (string) ($_SESSION['user']['name'] ?? ''));
 $fmLangChosen = fm_get_lang($fmUser);
 $GLOBALS['fmLang'] = $fmLangChosen !== '' ? $fmLangChosen : 'nl';
 
-header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'; frame-ancestors 'self'; base-uri 'self'; object-src 'none'");
+// Thumbnail van i.ytimg.com; het iframe (pas na een klik, client-side) van youtube-nocookie. Geen andere frames.
+header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com; connect-src 'self'; frame-src https://www.youtube-nocookie.com; form-action 'self'; frame-ancestors 'self'; base-uri 'self'; object-src 'none'");
 header('Referrer-Policy: strict-origin-when-cross-origin');
 header('X-Content-Type-Options: nosniff');
