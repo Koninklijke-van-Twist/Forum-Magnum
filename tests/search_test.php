@@ -13,14 +13,25 @@ check_same(['alpha', 'or', 'beta'], fm_search_terms('alpha" OR "beta'), 'FTS-ope
 check(str_contains(fm_search_snippet_html('Hallo <script>alert(1)</script> zoekterm hier', ['zoekterm']), '<mark>zoekterm</mark>'), 'treffer gemarkeerd');
 check(str_contains(fm_search_snippet_html('Hallo <script>alert(1)</script> zoekterm', ['zoekterm']), '&lt;script&gt;') && !str_contains(fm_search_snippet_html('Hallo <script>alert(1)</script> zoekterm', ['zoekterm']), '<script>'), 'snippet is HTML-veilig');
 check(str_contains(fm_search_snippet_html('lekker café vandaag', ['cafe']), '<mark>café</mark>'), 'diakriet in de markering');
+check(str_contains(fm_search_snippet_html('zie de afbeeldingen hier', ['afbeelding']), '<mark>afbeeldingen</mark>'), 'prefix markeert het langere woord');
+check(str_contains(fm_search_snippet_html('de xafbeeldingen.', ['afbeelding']), '<mark>xafbeeldingen</mark>.'), 'markering pakt het hele woord, leesteken blijft erbuiten');
+check_same('"afbeelding"*', fm_search_fts_quote('afbeelding'), 'FTS5-prefix per woord');
+check_same('"afbeelding"*', fm_search_fts_quote('afbeelding"*'), 'ster en aanhalingsteken komen niet in de term');
+check_same('"a"* AND "b"*', fm_search_fts_and(['a', 'b']), 'elk woord een eigen prefix');
+check_same('%afbeelding%', fm_search_like_pattern('afbeelding'), 'LIKE zoekt het woord als deel van een langer woord');
 $evil = fm_search_form_html(null, '"><script>');
 check(str_contains($evil, 'value="&quot;&gt;&lt;script&gt;"') && !str_contains($evil, '<script>'), 'zoekveld geëscaped');
-check(str_contains(fm_search_form_html(null), 'placeholder="Zoeken in threads en berichten"') && !str_contains(fm_search_form_html(null), 'name="s"'), 'zonder sectie: geen filter');
-$scope = fm_search_form_html('work', 'abc', false);
-check(str_contains($scope, 'name="from" value="work"') && str_contains($scope, '<input type="checkbox" name="s" value="work">') && str_contains($scope, 'Alleen in Werkgerelateerd'), 'sectiefilter staat uit');
-check(str_contains(fm_search_form_html('work', 'abc', true), 'value="work" checked'), 'sectiefilter aan');
-check_same('search.php?q=hallo&amp;from=work', str_replace('&', '&amp;', fm_search_url('hallo', null, 'work', 1)), 'zoek-URL bewaart de context');
-check_same('search.php?q=hallo&from=work', fm_safe_return_url('/forum-magnum/search.php?q=hallo&from=work'), 'taalwissel blijft op de zoekpagina');
+$indexForm = fm_search_form_html(null);
+check(str_contains($indexForm, 'placeholder="Zoeken in threads en berichten"') && !str_contains($indexForm, 'name="s"') && !str_contains($indexForm, 'name="thread"') && !str_contains($indexForm, 'checkbox'), 'index: zoeken overal');
+$scope = fm_search_form_html('general', 'abc');
+check(str_contains($scope, 'name="s" value="general"') && !str_contains($scope, 'checkbox') && !str_contains($scope, 'Alleen in') && !str_contains($scope, 'name="from"') && !str_contains($scope, 'name="thread"'), 'sectie: verborgen bereik, geen vinkje');
+$threadForm = fm_search_form_html('general', 'abc', 12);
+check(str_contains($threadForm, 'name="thread" value="12"') && !str_contains($threadForm, 'name="s"') && !str_contains($threadForm, 'checkbox'), 'thread wint van de sectie in het formulier');
+check_same('Zoeken in het hele forum', fm_search_scope_label(null, null), 'label: hele forum');
+check_same('Zoeken in Algemeen', fm_search_scope_label('general', null), 'label: sectie');
+check_same('search.php?q=hallo&amp;s=general', str_replace('&', '&amp;', fm_search_url('hallo', 'general', null, 1)), 'zoek-URL bewaart de sectie');
+check_same('search.php?q=hallo&amp;thread=12', str_replace('&', '&amp;', fm_search_url('hallo', 'general', 12, 1)), 'zoek-URL bewaart de thread en laat de sectie weg');
+check_same('search.php?q=hallo&s=general', fm_safe_return_url('/forum-magnum/search.php?q=hallo&s=general'), 'taalwissel blijft op de zoekpagina');
 check_same('index.php', fm_safe_return_url('search.php?q=https://evil.example'), 'zoek-URL met // is geen open redirect');
 
 check_same(FM_SCHEMA_VERSION, (int) fm_db()->query('PRAGMA user_version')->fetchColumn(), 'schema na zoekmigratie');
@@ -35,6 +46,11 @@ $reply = fm_reply($work, 'bob@kvt.nl', 'Ik neem de notulen mee', 1_700_000_100);
 $general = fm_create_thread('general', 'anna@kvt.nl', 'Fietsenstalling', 'niets bijzonders over de stalling', 1_700_000_200);
 fm_create_thread('work', 'anna@kvt.nl', 'Procent', '100%_x uniekprocent', 1_700_000_300);
 fm_create_thread('general', 'anna@kvt.nl', 'Bijna', '100ABCx geen procent', 1_700_000_400);
+$pics = fm_create_thread('general', 'anna@kvt.nl', 'Fotoalbum', 'de afbeeldingen staan online', 1_700_000_500);
+$otherPics = fm_create_thread('work', 'bob@kvt.nl', 'Werkfoto', 'ook afbeeldingen in het werk', 1_700_000_600);
+check_same('Zoeken in Welkom café', fm_search_scope_label('work', $work), 'label: threadtitel wint van de sectie');
+check_same('Zoeken in het hele forum', fm_search_scope_label(null, 999999), 'label: onbekende thread zonder sectie is het hele forum');
+check_same('Zoeken in Werkgerelateerd', fm_search_scope_label('work', 999999), 'label: onbekende thread valt terug op de sectie');
 
 $engines = ['like'];
 if (fm_search_uses_fts()) {
@@ -78,6 +94,19 @@ foreach ($engines as $engine) {
     $injected = fm_search('vergadering" OR "stalling', null, 1, $engine);
     check_same(0, $injected['total'], "$engine: OR-injectie verbreedt de zoekopdracht niet");
     check_same(0, fm_search('%', null, 1, $engine)['total'], "$engine: kale wildcard vindt niets");
+
+    $prefixed = fm_search('afbeelding', null, 1, $engine);
+    check_same(2, $prefixed['total'], "$engine: prefix afbeelding vindt afbeeldingen");
+    check(str_contains(fm_search_hits_html($prefixed['hits'], $prefixed['terms']), '<mark>afbeeldingen</mark>'), "$engine: heel woord gemarkeerd");
+    $inThread = fm_search('afbeelding', 'work', 1, $engine, $pics);
+    check_same(1, $inThread['total'], "$engine: threadbereik wint van de sectie");
+    check_same($pics, $inThread['hits'][0]['thread_id'], "$engine: alleen de gevraagde thread");
+    check_same(null, $inThread['section'], "$engine: sectie valt weg bij een threadbereik");
+    check_same($pics, $inThread['thread_id'], "$engine: thread_id in het resultaat");
+    $inWork = fm_search('afbeelding', 'work', 1, $engine);
+    check_same(1, $inWork['total'], "$engine: sectiebereik");
+    check_same($otherPics, $inWork['hits'][0]['thread_id'], "$engine: alleen threads uit de sectie");
+    check_same('work', $inWork['section'], "$engine: sectie blijft het bereik");
 }
 
 $literal = fm_search_execute(['100%_x'], null, 1, 'like');

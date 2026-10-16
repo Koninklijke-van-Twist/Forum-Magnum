@@ -133,7 +133,9 @@ check(str_contains($A('GET', $threadUrl)[1], 'href="section.php?s=announcements"
 check_same(200, $s, 'thread laadt');
 check(str_contains($body, 'Welkom &lt;b&gt;') && !str_contains($body, '<script>alert'), 'escaping titel en bericht');
 check(preg_match('#<nav class="breadcrumb" aria-label="breadcrumb"><ol><li><a href="index\.php">Forum Magnum</a></li><li><a href="section\.php\?s=announcements">Aankondigingen</a></li><li class="truncate" aria-current="page"><span title="Welkom &lt;b&gt;">Welkom &lt;b&gt;</span></li></ol></nav>#', $body) === 1, 'thread: Forum Magnum > sectie > titel, titel geëscaped');
-check(str_contains($body, 'class="search-form"') && str_contains($body, 'name="from" value="announcements"') && str_contains($body, '<input type="checkbox" name="s" value="announcements">'), 'thread: zoekbalk, sectiefilter uit');
+preg_match('/id=(\d+)/', $threadUrl, $threadMatch);
+$smokeThreadId = $threadMatch[1] ?? '0';
+check(str_contains($body, 'class="search-form"') && str_contains($body, 'name="thread" value="' . $smokeThreadId . '"') && !str_contains($body, 'type="checkbox"') && !str_contains($body, 'name="s"') && !str_contains($body, 'name="from"'), 'thread: zoekbalk alleen in deze thread');
 check(!str_contains($body, '<div class="bar"><h1>'), 'thread: geen h1-titel');
 check(str_contains($body, '<strong>allen</strong>') && str_contains($body, 'asclepius/index.php?open=1185'), 'opmaak en ticketlink');
 check(str_contains($body, '<span class="company-logo is-admin" role="img" aria-label="Koninklijke van Twist · Beheerder"') && str_contains($body, 'mask-image:url(&quot;assets/company/kvt.svg?v='), 'beheerder: gouden bedrijfslogo in posterblok');
@@ -206,13 +208,21 @@ check(substr_count($body, 'class="poster"') === 2, 'posterblok van verwijderd be
 check_same(200, $s, 'zoekpagina');
 check(str_contains($body, '<mark>Welkom</mark>') && str_contains($body, 'class="meta">Aankondigingen') && str_contains($body, '#p' . $firstPost) && str_contains($body, 'class="search-hit"'), 'zoekresultaat: titel gemarkeerd, sectie, anker');
 check(str_contains($body, '&lt;b&gt;') && !str_contains($body, '<b>') && !str_contains($body, '<script>'), 'zoekresultaat escaped');
-check(str_contains($body, 'aria-label="breadcrumb"') && str_contains($body, '>Zoeken</span>'), 'zoekpagina: kruimelpad');
+check(str_contains($body, 'aria-label="breadcrumb"') && str_contains($body, '>Zoeken in het hele forum</span>'), 'zoekpagina zonder context: hele forum');
+check(str_contains($body, '1 resultaat · Zoeken in het hele forum'), 'resultatenteller noemt het bereik');
+check(!str_contains($body, 'type="checkbox"') && !str_contains($body, 'name="s"') && !str_contains($body, 'name="thread"'), 'zoekpagina zonder context: formulier zoekt overal');
 [$s, $body] = $A('GET', 'search.php?q=' . rawurlencode('aangepast door anna'));
 check(!str_contains($body, 'class="search-hit"') && str_contains($body, 'Geen resultaten'), 'verwijderd bericht niet in zoekresultaten');
-[$s, $body] = $A('GET', 'search.php?q=' . rawurlencode('Welkom') . '&s=work&from=work');
-check(!str_contains($body, 'class="search-hit"') && str_contains($body, 'checked'), 'sectiefilter sluit andere sectie uit');
-[$s, $body] = $A('GET', 'search.php?q=' . rawurlencode('Welkom') . '&s=announcements&from=announcements');
-check(str_contains($body, 'class="search-hit"') && str_contains($body, 'value="announcements" checked'), 'sectiefilter kan de eigen sectie wel tonen');
+[$s, $body] = $A('GET', 'search.php?q=' . rawurlencode('Welkom') . '&s=work');
+check(!str_contains($body, 'class="search-hit"') && str_contains($body, '>Zoeken in Werkgerelateerd</span>') && str_contains($body, 'name="s" value="work"') && !str_contains($body, 'type="checkbox"'), 'sectiebereik sluit andere sectie uit');
+[$s, $body] = $A('GET', 'search.php?q=' . rawurlencode('Welkom') . '&s=announcements');
+check(str_contains($body, 'class="search-hit"') && str_contains($body, '>Zoeken in Aankondigingen</span>') && str_contains($body, 'name="s" value="announcements"'), 'sectiebereik toont de eigen sectie');
+[$s, $body] = $A('GET', 'search.php?q=' . rawurlencode('Welkom') . '&thread=' . $smokeThreadId);
+check(str_contains($body, 'class="search-hit"') && str_contains($body, 'Zoeken in Welkom &lt;b&gt;') && str_contains($body, 'name="thread" value="' . $smokeThreadId . '"') && !str_contains($body, 'name="s"'), 'threadbereik toont de threadtitel');
+[$s, $body] = $A('GET', 'search.php?q=' . rawurlencode('Welkom') . '&thread=999999999');
+check(str_contains($body, 'class="search-hit"') && str_contains($body, '>Zoeken in het hele forum</span>') && !str_contains($body, 'name="s"') && !str_contains($body, 'name="thread"'), 'onbekende thread zonder sectie zoekt overal');
+[$s, $body] = $A('GET', 'search.php?q=' . rawurlencode('Welkom') . '&thread=999999999&s=work');
+check(!str_contains($body, 'class="search-hit"') && str_contains($body, '>Zoeken in Werkgerelateerd</span>') && str_contains($body, 'name="s" value="work"') && !str_contains($body, 'name="thread"'), 'onbekende thread valt terug op de sectie');
 [$s] = $U('POST', $threadUrl, ['action' => 'delete', 'csrf' => $csrf, 'post' => $firstPost]);
 check_same(403, $s, 'gebruiker kan niet verwijderen');
 
@@ -244,7 +254,7 @@ check(preg_match('#<nav class="breadcrumb" aria-label="breadcrumb"><ol><li><a hr
 check(!str_contains($body, '<h1'), 'sectiepagina: geen h1');
 [$s, $ann] = $A('GET', 'section.php?s=announcements');
 check(preg_match('#<nav class="breadcrumb" aria-label="breadcrumb"><ol><li><a href="index\.php">Forum Magnum</a></li><li class="truncate" aria-current="page"><span title="Aankondigingen">Aankondigingen</span></li></ol></nav>#', $ann) === 1, 'sectiepagina (NL): Forum Magnum > Aankondigingen');
-check(str_contains($ann, 'class="search-form"') && str_contains($ann, 'name="from" value="announcements"') && str_contains($ann, '<input type="checkbox" name="s" value="announcements">') && str_contains($ann, 'Alleen in Aankondigingen'), 'sectiepagina: zoekbalk met optioneel filter, niet aangevinkt');
+check(str_contains($ann, 'class="search-form"') && str_contains($ann, 'name="s" value="announcements"') && !str_contains($ann, 'type="checkbox"') && !str_contains($ann, 'Alleen in') && !str_contains($ann, 'name="from"') && !str_contains($ann, 'name="thread"'), 'sectiepagina: zoekbalk beperkt tot de sectie');
 [$s, $body] = $U('GET', 'section.php?s=general&p=2');
 check_same(1, substr_count($body, '<li class="thread'), 'sectiepagina 2');
 preg_match('/href="(thread\.php\?id=\d+)">Onderwerp 1</', $body, $tm);
