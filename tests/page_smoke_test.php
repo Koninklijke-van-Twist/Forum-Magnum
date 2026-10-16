@@ -80,6 +80,7 @@ $U = fn (string $m, string $p, array $post = []) => http($user, 'user', $m, $p, 
 check_same(200, $s, 'index laadt');
 check(substr_count($body, 'name="lang" value=') >= 8 && str_contains($body, 'lang-big'), 'taalkeuze bij eerste login');
 check(!str_contains($body, 'class="sections"'), 'nog geen secties voor taalkeuze');
+check(!str_contains($body, 'class="search-form"'), 'taalkeuze: nog geen zoekbalk');
 check(stripos($hdr, "Content-Security-Policy: default-src 'self'; script-src 'self'") !== false, 'CSP');
 check(stripos($hdr, "img-src 'self' data: https://i.ytimg.com") !== false && stripos($hdr, "frame-src 'self' https://www.youtube-nocookie.com") !== false, 'CSP: YouTube-thumbnail en nocookie-frame');
 $csrf = csrf($body);
@@ -108,6 +109,7 @@ check(substr_count($body, '<section class="home-section') === 3 && strpos($body,
 check(substr_count($body, 'href="new.php?s=') === 3, 'admin: nieuwe-thread-knop bij alle drie');
 check(str_contains($body, '<h2><a class="section-link" href="section.php?s=announcements">Aankondigingen</a></h2>'), 'sectiekop linkt naar de sectiepagina');
 check(!str_contains($body, 'class="breadcrumb"'), 'startpagina: sectiekoppen, geen paginakruimelpad');
+check(str_contains($body, 'class="search-form"') && str_contains($body, 'action="search.php"') && str_contains($body, 'placeholder="Zoeken in threads en berichten"') && !str_contains($body, 'name="s"'), 'startpagina: zoekbalk, standaard overal');
 
 // Aankondigingen: alleen admin start threads.
 [$s, $body] = $U('GET', 'index.php');
@@ -131,6 +133,7 @@ check(str_contains($A('GET', $threadUrl)[1], 'href="section.php?s=announcements"
 check_same(200, $s, 'thread laadt');
 check(str_contains($body, 'Welkom &lt;b&gt;') && !str_contains($body, '<script>alert'), 'escaping titel en bericht');
 check(preg_match('#<nav class="breadcrumb" aria-label="breadcrumb"><ol><li><a href="index\.php">Forum Magnum</a></li><li><a href="section\.php\?s=announcements">Aankondigingen</a></li><li class="truncate" aria-current="page"><span title="Welkom &lt;b&gt;">Welkom &lt;b&gt;</span></li></ol></nav>#', $body) === 1, 'thread: Forum Magnum > sectie > titel, titel geëscaped');
+check(str_contains($body, 'class="search-form"') && str_contains($body, 'name="from" value="announcements"') && str_contains($body, '<input type="checkbox" name="s" value="announcements">'), 'thread: zoekbalk, sectiefilter uit');
 check(!str_contains($body, '<div class="bar"><h1>'), 'thread: geen h1-titel');
 check(str_contains($body, '<strong>allen</strong>') && str_contains($body, 'asclepius/index.php?open=1185'), 'opmaak en ticketlink');
 check(str_contains($body, '<span class="company-logo is-admin" role="img" aria-label="Koninklijke van Twist · Beheerder"') && str_contains($body, 'mask-image:url(&quot;assets/company/kvt.svg?v='), 'beheerder: gouden bedrijfslogo in posterblok');
@@ -199,6 +202,17 @@ check_same(303, $s, 'admin verwijdert reactie');
 check(str_contains($body, 'class="post is-deleted"') && str_contains($body, '>Bericht verwijderd<') && !str_contains($body, 'aangepast door anna'), 'verwijderd bericht leeg en gemarkeerd');
 check(preg_match('/<article class="post is-deleted" id="p(\d+)"[^>]*>.*?data-copy-link="post\.php\?id=\1"/s', $body) === 1, 'verwijderd bericht: link kopiëren kan ook');
 check(substr_count($body, 'class="poster"') === 2, 'posterblok van verwijderd bericht blijft');
+[$s, $body] = $A('GET', 'search.php?q=' . rawurlencode('Welkom'));
+check_same(200, $s, 'zoekpagina');
+check(str_contains($body, '<mark>Welkom</mark>') && str_contains($body, 'class="meta">Aankondigingen') && str_contains($body, '#p' . $firstPost) && str_contains($body, 'class="search-hit"'), 'zoekresultaat: titel gemarkeerd, sectie, anker');
+check(str_contains($body, '&lt;b&gt;') && !str_contains($body, '<b>') && !str_contains($body, '<script>'), 'zoekresultaat escaped');
+check(str_contains($body, 'aria-label="breadcrumb"') && str_contains($body, '>Zoeken</span>'), 'zoekpagina: kruimelpad');
+[$s, $body] = $A('GET', 'search.php?q=' . rawurlencode('aangepast door anna'));
+check(!str_contains($body, 'class="search-hit"') && str_contains($body, 'Geen resultaten'), 'verwijderd bericht niet in zoekresultaten');
+[$s, $body] = $A('GET', 'search.php?q=' . rawurlencode('Welkom') . '&s=work&from=work');
+check(!str_contains($body, 'class="search-hit"') && str_contains($body, 'checked'), 'sectiefilter sluit andere sectie uit');
+[$s, $body] = $A('GET', 'search.php?q=' . rawurlencode('Welkom') . '&s=announcements&from=announcements');
+check(str_contains($body, 'class="search-hit"') && str_contains($body, 'value="announcements" checked'), 'sectiefilter kan de eigen sectie wel tonen');
 [$s] = $U('POST', $threadUrl, ['action' => 'delete', 'csrf' => $csrf, 'post' => $firstPost]);
 check_same(403, $s, 'gebruiker kan niet verwijderen');
 
@@ -230,6 +244,7 @@ check(preg_match('#<nav class="breadcrumb" aria-label="breadcrumb"><ol><li><a hr
 check(!str_contains($body, '<h1'), 'sectiepagina: geen h1');
 [$s, $ann] = $A('GET', 'section.php?s=announcements');
 check(preg_match('#<nav class="breadcrumb" aria-label="breadcrumb"><ol><li><a href="index\.php">Forum Magnum</a></li><li class="truncate" aria-current="page"><span title="Aankondigingen">Aankondigingen</span></li></ol></nav>#', $ann) === 1, 'sectiepagina (NL): Forum Magnum > Aankondigingen');
+check(str_contains($ann, 'class="search-form"') && str_contains($ann, 'name="from" value="announcements"') && str_contains($ann, '<input type="checkbox" name="s" value="announcements">') && str_contains($ann, 'Alleen in Aankondigingen'), 'sectiepagina: zoekbalk met optioneel filter, niet aangevinkt');
 [$s, $body] = $U('GET', 'section.php?s=general&p=2');
 check_same(1, substr_count($body, '<li class="thread'), 'sectiepagina 2');
 preg_match('/href="(thread\.php\?id=\d+)">Onderwerp 1</', $body, $tm);

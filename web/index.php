@@ -15,6 +15,7 @@ if ($fmLangChosen === '') {
 // De drie threadlijsten onder elkaar, elk met eigen paginering (?p_ann, ?p_work, ?p_gen)
 // en een eigen aantal per pagina; de sectiekop opent de losse sectiepagina.
 fm_header(fm_t('forum'));
+echo '<div class="bar search-only">' . fm_search_form_html(null) . '</div>';
 foreach (FM_SECTIONS as $section) {
     $page = (int) ($_GET[FM_SECTION_PAGE_PARAMS[$section]] ?? 1);
     echo '<section class="home-section section-' . h($section) . '" id="sec-' . h($section) . '">'
