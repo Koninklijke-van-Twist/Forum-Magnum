@@ -735,6 +735,10 @@ function renderMessageInlineHtml(string $text, bool $forEmail = false): string
     return restoreMessageInlineCodePlaceholders($html, $inlineCode['codes']);
 }
 
+/**
+ * Fenced blok. De taalklasse is voor highlight.js in de browser; onbekende talen
+ * (zoals al) blijven platte tekst. Alleen ge-escapete tekst, geen ruwe HTML.
+ */
 function renderMessageMarkdownCodeBlock(string $language, string $code): string
 {
     $language = strtolower(trim($language));

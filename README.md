@@ -49,6 +49,10 @@ het logo (`web/thumbnail.png`) is gebleven.
   codeblokken, lijsten, citaten, tabellen, toetsen (`[Ctrl]`), autodetectie van URL's,
   e-mail en telefoonnummers (URL's, e-mails, markdownlinks en code gaan niet nog eens door
   de telefoondetector). Alle tekst wordt eerst ge-escaped; alleen http(s)/mailto-links.
+  - Fenced blokken (` ```js `, php, sql, html, css, json, bash, xml, powershell) krijgen na het
+    renderen syntaxiskleuring in de browser via lokaal highlight.js (geen CDN, geen inline script).
+    ` ```al ` blijft platte tekst. Kleuring werkt alleen op de al ge-escapete code.
+    Bij vertalen gaat de broncode eruit (placeholder) en komt het originele blok terug.
   - `#1185` → ticket 1185 in Asclepius; Asclepius-URL's krijgen het label `Ticket #1185`.
   - `post#123` → forumbericht 123: `post.php?id=123` stuurt door naar de juiste thread,
     de juiste pagina en het bericht (`#p123`). Elk bericht toont zijn eigen `post#…`-link.

@@ -290,6 +290,10 @@ $code = tempnam(getenv('FM_DATA_DIR'), 'php');
 file_put_contents($code, "<?php\necho '<script>alert(1)</script>';\n");
 $codeHtml = px_html('index.php', 'text/x-php', $code);
 check(str_contains($codeHtml, 'language-php') && str_contains($codeHtml, '&lt;script&gt;') && !str_contains($codeHtml, '<script'), 'php-bron ge-escaped');
+$ps = tempnam(getenv('FM_DATA_DIR'), 'ps1');
+file_put_contents($ps, "Get-Process | Where-Object { \$_.Name -eq '<script>' }\n");
+$psHtml = px_html('taak.ps1', 'text/plain', $ps);
+check(str_contains($psHtml, 'language-powershell') && str_contains($psHtml, '&lt;script&gt;') && !str_contains($psHtml, '<script'), 'powershell-bron ge-escaped');
 
 $md = tempnam(getenv('FM_DATA_DIR'), 'md');
 file_put_contents($md, "# Hallo\n\n**vet** en [x](javascript:alert(1))\n\n<script>alert(1)</script>\n");

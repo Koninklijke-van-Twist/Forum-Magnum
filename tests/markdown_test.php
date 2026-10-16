@@ -16,6 +16,14 @@ check(str_contains($r('__vet__ en _schuin_'), '<strong>vet</strong>') && str_con
 check(!str_contains($r('snake_case_name en file_name.txt'), '<em>'), 'geen nadruk in snake_case');
 check(str_contains($r("# Kop\n\n> een citaat"), 'class="message-md-heading') && str_contains($r('> een citaat'), 'message-md-quote'), 'kop en citaat');
 check(str_contains($r("```\n<b>x</b>\n```"), '<pre class="message-md-pre"><code>&lt;b&gt;x&lt;/b&gt;</code></pre>'), 'codeblok ge-escaped');
+foreach (['js', 'php', 'sql', 'html', 'css', 'json', 'bash', 'xml', 'powershell'] as $lang) {
+    $block = $r("```{$lang}\nconst x = '<b>';\n```");
+    check(str_contains($block, 'class="language-' . $lang . '"') && str_contains($block, "&lt;b&gt;") && !str_contains($block, '<b>'), $lang . '-klasse, inhoud ge-escaped');
+}
+$al = $r("```al\ncodeunit 50100 \"Foo\"\n```");
+check(str_contains($al, 'class="language-al"') && str_contains($al, 'codeunit 50100') && !str_contains($al, '<codeunit'), 'al-klasse, platte ge-escapete tekst');
+$htmlBlock = $r("```html\n<script>alert(1)</script>\n```");
+check(str_contains($htmlBlock, 'class="language-html"') && str_contains($htmlBlock, '&lt;script&gt;alert(1)&lt;/script&gt;') && !str_contains($htmlBlock, '<script'), 'html-blok geen ruwe HTML');
 check(str_contains($r("- een\n- twee"), '<ul class="message-md-list"><li>een</li><li>twee</li></ul>'), 'lijst');
 check(str_contains($r("| a | b |\n|---|---|\n| 1 | 2 |"), '<table class="message-md-table">'), 'tabel');
 

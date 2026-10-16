@@ -289,8 +289,185 @@ function fm_translate_callback_base(array $config): string
 }
 
 /**
+ * Gesloten fenced codeblokken, met dezelfde grenzen als de renderer
+ * (opening ```taal, sluitregel alleen ```).
+ *
+ * @return list<array{start:int, end:int, raw:string, token:string}>
+ */
+function fm_fenced_code_blocks(string $text): array
+{
+    $lines = explode("\n", str_replace(["\r\n", "\r"], "\n", $text));
+    $blocks = [];
+    foreach (fm_fenced_code_span_list($lines) as [$start, $end]) {
+        $raw = implode("\n", array_slice($lines, $start, $end - $start + 1));
+        $token = '';
+        for ($n = 0; $n < 8; $n++) {
+            $token = 'FMCODEBLOCK' . count($blocks) . 'X' . substr(hash('sha256', $raw . '|' . $n), 0, 8);
+            if (!str_contains($raw, $token)) {
+                break;
+            }
+        }
+        $blocks[] = ['start' => $start, 'end' => $end, 'raw' => $raw, 'token' => $token];
+    }
+
+    return $blocks;
+}
+
+/**
+ * @param list<string> $lines
+ * @return list<array{0:int, 1:int}>
+ */
+function fm_fenced_code_span_list(array $lines): array
+{
+    $spans = [];
+    $count = count($lines);
+    $index = 0;
+    while ($index < $count) {
+        if (preg_match('/^```[a-zA-Z0-9_-]*[ \t]*$/', trim((string) $lines[$index])) === 1) {
+            for ($look = $index + 1; $look < $count; $look++) {
+                if (preg_match('/^```[ \t]*$/', trim((string) $lines[$look])) === 1) {
+                    $spans[] = [$index, $look];
+                    $index = $look + 1;
+                    continue 2;
+                }
+            }
+        }
+        $index++;
+    }
+
+    return $spans;
+}
+
+/**
+ * Vervang fenced codeblokken door een placeholder in een eigen codeblok.
+ * De broncode gaat zo niet naar de vertaalflow. Zonder blokken blijft de tekst gelijk.
+ */
+function fm_shield_fenced_code(string $text): string
+{
+    $normalized = str_replace(["\r\n", "\r"], "\n", $text);
+    $blocks = fm_fenced_code_blocks($normalized);
+    if ($blocks === []) {
+        return $text;
+    }
+    $lines = explode("\n", $normalized);
+    $out = [];
+    $cursor = 0;
+    foreach ($blocks as $block) {
+        for ($i = $cursor; $i < $block['start']; $i++) {
+            $out[] = $lines[$i];
+        }
+        $out[] = '```';
+        $out[] = $block['token'];
+        $out[] = '```';
+        $cursor = $block['end'] + 1;
+    }
+    $lineCount = count($lines);
+    for ($i = $cursor; $i < $lineCount; $i++) {
+        $out[] = $lines[$i];
+    }
+
+    return implode("\n", $out);
+}
+
+/** Zet placeholders terug, of — als die weg zijn — de originele blokken op volgorde bij een gelijk aantal. */
+function fm_restore_fenced_code(string $translated, string $source): string
+{
+    $blocks = fm_fenced_code_blocks($source);
+    if ($blocks === []) {
+        return $translated;
+    }
+    $out = str_replace(["\r\n", "\r"], "\n", $translated);
+    $found = false;
+    foreach ($blocks as $block) {
+        if (!str_contains($out, $block['token'])) {
+            continue;
+        }
+        $found = true;
+        $out = fm_replace_fenced_token($out, $block['token'], $block['raw']);
+    }
+    if (!$found) {
+        $out = fm_replace_fences_in_order($out, $blocks);
+    }
+
+    return $out;
+}
+
+function fm_replace_fenced_token(string $text, string $token, string $raw): string
+{
+    $lines = explode("\n", $text);
+    $count = count($lines);
+    $out = [];
+    $index = 0;
+    while ($index < $count) {
+        if (preg_match('/^```[a-zA-Z0-9_-]*[ \t]*$/', trim((string) $lines[$index])) === 1) {
+            for ($look = $index + 1; $look < $count; $look++) {
+                if (preg_match('/^```[ \t]*$/', trim((string) $lines[$look])) !== 1) {
+                    continue;
+                }
+                $body = implode("\n", array_slice($lines, $index + 1, $look - $index - 1));
+                if (str_contains($body, $token)) {
+                    foreach (explode("\n", $raw) as $rawLine) {
+                        $out[] = $rawLine;
+                    }
+                    $index = $look + 1;
+                    continue 2;
+                }
+                for ($line = $index; $line <= $look; $line++) {
+                    $out[] = $lines[$line];
+                }
+                $index = $look + 1;
+                continue 2;
+            }
+        }
+        $line = $lines[$index];
+        if (str_contains($line, $token)) {
+            $line = str_replace('`' . $token . '`', $raw, $line);
+            $line = str_replace($token, $raw, $line);
+            foreach (explode("\n", $line) as $part) {
+                $out[] = $part;
+            }
+        } else {
+            $out[] = $line;
+        }
+        $index++;
+    }
+
+    return implode("\n", $out);
+}
+
+/**
+ * @param list<array{raw:string}> $blocks
+ */
+function fm_replace_fences_in_order(string $text, array $blocks): string
+{
+    $lines = explode("\n", $text);
+    $spans = fm_fenced_code_span_list($lines);
+    if (count($spans) !== count($blocks)) {
+        return $text;
+    }
+    $out = [];
+    $cursor = 0;
+    foreach ($spans as $i => [$start, $end]) {
+        for ($line = $cursor; $line < $start; $line++) {
+            $out[] = $lines[$line];
+        }
+        foreach (explode("\n", $blocks[$i]['raw']) as $rawLine) {
+            $out[] = $rawLine;
+        }
+        $cursor = $end + 1;
+    }
+    $lineCount = count($lines);
+    for ($line = $cursor; $line < $lineCount; $line++) {
+        $out[] = $lines[$line];
+    }
+
+    return implode("\n", $out);
+}
+
+/**
  * Stuur één bericht naar de flow. $timeout null = config-syncTimeout (na fastcgi_finish_request
  * mag dat lang zijn, zodat een synchrone Response meteen verwerkt wordt).
+ * Fenced codeblokken gaan er als placeholder uit; fm_store_translations zet de bron terug.
  */
 function fm_translate_post(int $postId, ?float $timeout = null): void
 {
@@ -312,7 +489,7 @@ function fm_translate_post(int $postId, ?float $timeout = null): void
         $GLOBALS['fmTranslateGuard'] = true;
         register_shutdown_function('fm_translation_abort_guard');
     }
-    $result = cpt_send($config, (string) $postId, $body, $hint !== '' ? $hint : null, $callbackUrl, $token,
+    $result = cpt_send($config, (string) $postId, fm_shield_fenced_code($body), $hint !== '' ? $hint : null, $callbackUrl, $token,
         fm_translate_sync_timeout($config, $timeout), $status, $error);
     $GLOBALS['fmTranslateInflight'] = null;
     fm_release_retry($postId, $claimedAt); // bewerkt tijdens de aanvraag: nu mag de nieuwe tekst
@@ -346,8 +523,10 @@ function fm_store_translations(int $postId, string $hash, array $translations, ?
         $now = time();
         $st = $pdo->prepare('INSERT INTO post_translations (post_id, lang, text, source_hash, updated_at) VALUES (?,?,?,?,?)
             ON CONFLICT(post_id, lang) DO UPDATE SET text = excluded.text, source_hash = excluded.source_hash, updated_at = excluded.updated_at');
+        $sourceBody = (string) $post['body'];
         foreach ($translations as $lang => $text) {
             if (array_key_exists((string) $lang, FM_LANGUAGES) && is_string($text)) {
+                $text = fm_restore_fenced_code($text, $sourceBody);
                 $st->execute([$postId, (string) $lang, fm_clean_text($text, 40000), $hash, $now]);
             }
         }

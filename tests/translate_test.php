@@ -368,4 +368,45 @@ check(str_contains($poll[$mdId]['html'] ?? '', 'data-yt-id="dQw4w9WgXcQ"') && !s
 $pollDe = fm_translation_poll([$mdId], 'de', false);
 check(str_contains($pollDe[$mdId]['html'] ?? '', 'message-md-quote'), 'vertaling: citaat');
 
+// Fenced codeblokken gaan niet naar de vertaler en komen ongewijzigd terug.
+check_same("regel\r\n twee", fm_shield_fenced_code("regel\r\n twee"), 'zonder blok blijft de tekst gelijk');
+check_same('gebruik `SELECT 1`', fm_shield_fenced_code('gebruik `SELECT 1`'), 'inline code niet afgeschermd');
+check_same("```js\nconst a = 1;", fm_shield_fenced_code("```js\nconst a = 1;"), 'onafgesloten fence blijft');
+$src = "Zie:\n\n```php\n<?php echo '<script>';\n```\n\nKlaar.";
+$shielded = fm_shield_fenced_code($src);
+$blocks = fm_fenced_code_blocks($src);
+check(count($blocks) === 1 && !str_contains($shielded, 'echo') && !str_contains($shielded, '<script'), 'broncode niet in de payload');
+check(str_contains($shielded, "Zie:\n\n```\n" . $blocks[0]['token'] . "\n```\n\nKlaar."), 'placeholder in een codeblok, proza blijft');
+check_same($src, fm_restore_fenced_code($shielded, $src), 'placeholder wordt het originele blok');
+$swapped = "```sql\nSELECT 'vertaald';\n```";
+check_same("See this:\n\n```php\n<?php echo '<script>';\n```\n\nEnd.", fm_restore_fenced_code("See this:\n\n" . $swapped . "\n\nEnd.", $src), 'vertaalde code terug naar de bron, proza blijft');
+$extra = "See\n\n```php\necho 1;\n```\n\n```php\necho 2;\n```";
+check(str_contains(fm_restore_fenced_code($extra, $src), 'echo 1') && str_contains(fm_restore_fenced_code($extra, $src), 'echo 2'), 'afwijkend aantal blokken niet herschreven');
+$alSrc = "Uitleg\n\n```al\ncodeunit 50100 Foo\n```";
+check(!str_contains(fm_shield_fenced_code($alSrc), 'codeunit'), 'al-blok ook afgeschermd');
+$pair = "```js\nconst a = 1;\n```\n\nen\n\n```sql\nSELECT 1;\n```";
+$pairBlocks = fm_fenced_code_blocks($pair);
+$pairShield = fm_shield_fenced_code($pair);
+$pairSwapped = str_replace([$pairBlocks[0]['token'], $pairBlocks[1]['token']], ['__TMP__', $pairBlocks[0]['token']], $pairShield);
+$pairSwapped = str_replace('__TMP__', $pairBlocks[1]['token'], $pairSwapped);
+$pairBack = fm_restore_fenced_code($pairSwapped, $pair);
+check(str_starts_with($pairBack, "```sql\nSELECT 1;\n```\n\nen\n\n```js\nconst a = 1;\n```"), 'tokens houden het juiste blok, ook als de volgorde wisselt');
+$codeBody = "Zie\n\n```html\n<script>alert(1)</script>\n```\n\nKlaar";
+$codeId = fm_first_post_id(fm_create_thread('general', 'jan@kvt.nl', 'Codeblok', $codeBody));
+$codePost = fm_get_post($codeId);
+$codeStored = (string) $codePost['body'];
+$codeToken = fm_fenced_code_blocks($codeStored)[0]['token'];
+check(fm_store_translations($codeId, fm_source_hash($codeStored), [
+    'nl' => $codeStored,
+    'en' => "See\n\n```\n" . $codeToken . "\n```\n\nDone",
+    'fr' => "Voir\n\n```html\n<script>alerte(1)</script>\n```\n\nFini",
+    'de' => "Siehe\n\n`" . $codeToken . "`\n\nFertig",
+], 'nl'), 'codeblok-vertaling opgeslagen');
+$codeTr = fm_translations_for_posts([fm_get_post($codeId)])[$codeId];
+check(str_contains($codeTr['en'], "<script>alert(1)</script>") && str_contains($codeTr['en'], 'See') && str_contains($codeTr['en'], 'Done') && !str_contains($codeTr['en'], 'FMCODEBLOCK'), 'en: originele code, vertaald proza');
+check(str_contains($codeTr['fr'], "<script>alert(1)</script>") && !str_contains($codeTr['fr'], 'alerte') && str_contains($codeTr['fr'], 'Voir'), 'fr: herschreven blok teruggedraaid');
+check(str_contains($codeTr['de'], "```html\n<script>alert(1)</script>\n```") && str_contains($codeTr['de'], 'Siehe'), 'de: placeholder in backticks');
+$codeHtml = renderTicketMessageMarkdown($codeTr['en']);
+check(str_contains($codeHtml, 'class="language-html"') && str_contains($codeHtml, '&lt;script&gt;alert(1)&lt;/script&gt;') && !str_contains($codeHtml, '<script'), 'hersteld blok blijft ge-escaped');
+
 finish('translate');

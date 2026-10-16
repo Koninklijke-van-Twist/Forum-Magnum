@@ -73,6 +73,9 @@ Regels:
 - Laat alle opmaak (Markdown zoals **vet**, *schuin*, lijsten, koppen, tabellen, links) exact staan.
 - Laat @-vermeldingen (zoals @jan.jansen), post#123-verwijzingen, #1234, URL's, e-mailadressen,
   bestandsnamen en alles tussen `backticks` of in ```codeblokken``` ONGEWIJZIGD.
+  Het forum haalt fenced codeblokken vóór verzenden al uit de tekst en zet er een placeholder
+  voor in de plaats (`FMCODEBLOCKnX……` in een eigen codeblok). Laat die placeholder staan;
+  het forum zet daarna het originele blok terug.
 - Behoud regeleinden. Voeg niets toe en laat niets weg.
 - Voor de brontaal zelf: geef de originele tekst ongewijzigd terug.
 
