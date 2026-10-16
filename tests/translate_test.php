@@ -357,13 +357,14 @@ $mdBody = "Hallo **team**\n\n<script>alert(1)</script>";
 $mdId = fm_first_post_id(fm_create_thread('general', 'jan@kvt.nl', 'Markdown', $mdBody));
 check(fm_store_translations($mdId, fm_source_hash($mdBody), [
     'nl' => $mdBody,
-    'en' => "Hello **team**\n\n- item\n\n<script>alert(1)</script>",
+    'en' => "Hello **team**\n\n- item\n\n<script>alert(1)</script>\n\nhttps://youtu.be/dQw4w9WgXcQ",
     'fr' => 'Bonjour **equipe**',
     'de' => "Hallo\n\n> Zitat",
 ], 'nl'), 'markdown-vertaling opgeslagen');
 $poll = fm_translation_poll([$mdId], 'en', false);
 check(str_contains($poll[$mdId]['html'] ?? '', '<strong>team</strong>') && str_contains($poll[$mdId]['html'] ?? '', '<li>item</li>'), 'vertaling: vet en lijst');
 check(!str_contains($poll[$mdId]['html'] ?? '', '<script'), 'vertaling: geen ruwe HTML');
+check(str_contains($poll[$mdId]['html'] ?? '', 'data-yt-id="dQw4w9WgXcQ"') && !str_contains($poll[$mdId]['html'] ?? '', '<iframe'), 'vertaling: kale YouTube-URL wordt facade');
 $pollDe = fm_translation_poll([$mdId], 'de', false);
 check(str_contains($pollDe[$mdId]['html'] ?? '', 'message-md-quote'), 'vertaling: citaat');
 

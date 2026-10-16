@@ -55,4 +55,102 @@ check(str_contains($r('post#42'), 'Message n° 42'), 'label vertaald');
 $GLOBALS['fmLang'] = 'nl';
 check(str_contains($r('[eerder](post.php?id=3)'), '<a href="post.php?id=3">eerder</a>'), 'relatieve markdownlink naar bericht, zelfde tab');
 
+// Kale YouTube-URL → klik-om-te-laden facade. Geen iframe in de HTML.
+$id = 'dQw4w9WgXcQ';
+$thumb = 'src="https://i.ytimg.com/vi/' . $id . '/hqdefault.jpg"';
+$bare = [
+    "https://www.youtube.com/watch?v=$id" => null,
+    "https://youtube.com/watch?v=$id" => null,
+    "https://m.youtube.com/watch?v=$id" => null,
+    "http://www.youtube.com/watch?v=$id" => null,
+    "https://WWW.YouTube.com/watch?v=$id" => null,
+    "https://youtu.be/$id" => null,
+    "https://www.youtu.be/$id" => null,
+    "https://www.youtube.com/shorts/$id" => null,
+    "https://youtube.com/shorts/$id" => null,
+    "https://m.youtube.com/shorts/$id" => null,
+    "http://m.youtube.com/shorts/$id?t=12" => 12,
+    "www.youtube.com/watch?v=$id" => null,
+    "youtube.com/watch?v=$id" => null,
+    "m.youtube.com/watch?v=$id" => null,
+    "youtu.be/$id" => null,
+    "m.youtu.be/$id" => null,
+    "https://www.youtube.com/watch?v=$id&t=43" => 43,
+    "https://www.youtube.com/watch?t=1m30s&v=$id" => 90,
+    "https://www.youtube.com/watch?v=$id&t=90s" => 90,
+    "https://youtu.be/$id?t=1h2m3s" => 3723,
+    "https://youtu.be/$id?t=1m30" => 90,
+    "https://youtu.be/$id?t=0" => 0,
+    "https://www.youtube.com/shorts/$id?t=7" => 7,
+    "https://youtu.be/$id?si=abcdefghijk&t=15" => 15,
+    "https://www.youtube.com/watch?v=$id&list=PLabcdefghij&feature=share" => null,
+];
+foreach ($bare as $url => $start) {
+    $html = $r($url);
+    check(str_contains($html, 'data-yt-id="' . $id . '"') && str_contains($html, $thumb) && str_contains($html, '<button type="button" class="yt-facade"'), "embed: $url");
+    check(str_contains($html, '<div class="yt-embed">') && !str_contains($html, '<iframe') && !str_contains($html, 'youtube-nocookie') && !str_contains($html, 'href="'), "facade zonder iframe of link: $url");
+    if ($start === null) {
+        check(!str_contains($html, 'data-yt-start'), "geen start: $url");
+    } else {
+        check(str_contains($html, 'data-yt-start="' . $start . '"'), "start $start: $url");
+    }
+}
+$html = $r('Voor de video https://youtu.be/' . $id . ' en daarna nog tekst.');
+$see = strpos($html, 'Voor de video');
+$box = strpos($html, 'class="yt-embed"');
+$after = strpos($html, 'en daarna nog tekst.');
+check($see !== false && $box !== false && $after !== false && $see < $box && $box < $after, 'tekst ervoor erboven, tekst erna eronder');
+check(!str_contains($html, 'youtu.be/' . $id), 'kale URL is verborgen');
+check(str_contains($r('https://youtu.be/' . $id . '.'), 'data-yt-id="' . $id . '"') && str_ends_with($r('https://youtu.be/' . $id . '.'), '.'), 'punt achter de URL blijft staan');
+$mixed = 'a1_-BCDEFGH';
+check(str_contains($r('https://youtu.be/' . $mixed), 'data-yt-id="' . $mixed . '"'), 'id met koppelteken en underscore');
+check(str_contains($r('https://youtu.be/abcdefghi__'), 'data-yt-id="abcdefghi__"'), 'id die op _ eindigt');
+check(str_contains($r('https://youtu.be/abcdefghi--'), 'data-yt-id="abcdefghi--"'), 'id die op - eindigt');
+check(str_contains($r("- punt\n- https://youtu.be/$id"), '<li><div class="yt-embed">'), 'embed in een lijst');
+check(!str_contains($r("```\nhttps://youtu.be/$id\n```"), 'data-yt-id'), 'niet in een codeblok');
+check(!str_contains($r('`https://youtu.be/' . $id . '`'), 'data-yt-id'), 'niet in inline code');
+
+// Expliciete markdown-link blijft een gewone link, ook midden in een zin.
+foreach ([
+    "https://www.youtube.com/watch?v=$id",
+    "https://youtu.be/$id?t=10",
+    "https://m.youtube.com/shorts/$id",
+] as $url) {
+    $html = $r('Zie [de video](' . $url . ') hier.');
+    check(str_contains($html, '<a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '"'), "markdown-link blijft link: $url");
+    check(str_contains($html, '>de video</a>') && str_contains($html, 'Zie ') && str_contains($html, ' hier.'), "markdown-link inline: $url");
+    check(!str_contains($html, 'data-yt-id') && !str_contains($html, 'yt-embed'), "markdown-link geen embed: $url");
+}
+$html = $r('Zie https://youtu.be/' . $id . ' en [dit](https://youtu.be/' . $id . ').');
+check(substr_count($html, 'data-yt-id="' . $id . '"') === 1 && substr_count($html, '<a ') === 1, 'kale URL embed, markdown-link ernaast blijft link');
+
+// Ongeldige id of geen video-URL: geen embed. https-URL blijft een gewone link.
+$invalidLinks = [
+    'https://www.youtube.com/watch?v=short',
+    'https://www.youtube.com/watch?v=dQw4w9WgXc',
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQQ',
+    'https://www.youtube.com/watch?v=dQw4w9WgX$Q',
+    'https://youtu.be/abc',
+    'https://youtu.be/abcdefghij',
+    'https://www.youtube.com/embed/' . $id,
+    'https://www.youtube.com/watch?list=PLabcdefghij',
+    'https://www.youtube.com.evil.example/watch?v=' . $id,
+    'https://evil.youtube.com/watch?v=' . $id,
+    'https://notyoutube.com/watch?v=' . $id,
+    'https://www.youtube-nocookie.com/embed/' . $id,
+];
+foreach ($invalidLinks as $url) {
+    $html = $r($url);
+    check(!str_contains($html, 'data-yt-id') && !str_contains($html, 'i.ytimg.com') && !str_contains($html, '<iframe'), "geen embed: $url");
+    check(str_contains($html, '<a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '"'), "blijft link: $url");
+}
+check(!str_contains($r('youtube.com/watch?v=short'), 'data-yt-id'), 'kale ongeldige id zonder schema blijft tekst');
+check(!str_contains($r('youtu.be/nope'), 'data-yt-id'), 'te korte youtu.be blijft tekst');
+$html = $r('https://youtu.be/' . $id . '?t=nope');
+check(str_contains($html, 'data-yt-id="' . $id . '"') && !str_contains($html, 'data-yt-start'), 'ongeldige starttijd valt weg, video blijft');
+$html = $r('https://www.youtube.com/watch?v=' . $id . '&t=43xonload=alert(1)');
+check(str_contains($html, 'data-yt-id="' . $id . '"') && !str_contains($html, 'data-yt-start') && !str_contains($html, 'onload'), 'ongeldige start komt niet in de HTML');
+check(!str_contains($r('<iframe src="https://www.youtube.com/embed/' . $id . '"></iframe>'), '<iframe'), 'willekeurige iframe blijft ge-escaped');
+check(str_contains($r('https://youtu.be/' . $id), 'aria-label="YouTube-video afspelen"'), 'knop met toegankelijke naam');
+
 finish('markdown');

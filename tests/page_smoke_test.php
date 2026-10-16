@@ -81,6 +81,7 @@ check_same(200, $s, 'index laadt');
 check(substr_count($body, 'name="lang" value=') >= 8 && str_contains($body, 'lang-big'), 'taalkeuze bij eerste login');
 check(!str_contains($body, 'class="sections"'), 'nog geen secties voor taalkeuze');
 check(stripos($hdr, "Content-Security-Policy: default-src 'self'; script-src 'self'") !== false, 'CSP');
+check(stripos($hdr, "img-src 'self' data: https://i.ytimg.com") !== false && stripos($hdr, "frame-src 'self' https://www.youtube-nocookie.com") !== false, 'CSP: YouTube-thumbnail en nocookie-frame');
 $csrf = csrf($body);
 check($csrf !== '', 'CSRF-token');
 [$s] = $U('POST', 'lang.php', ['lang' => 'de']);
