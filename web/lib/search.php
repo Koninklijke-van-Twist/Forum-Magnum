@@ -9,9 +9,11 @@ declare(strict_types=1);
  * plus virtuele tabel search_fts. Een threadrij (id = -thread_id) bevat alleen
  * de titel; een berichtrij bevat titel + tekst + vertalingen, zodat een zoekterm
  * in de titel én een term in het bericht samen matchen. Titel-only treffers
- * worden één resultaat per thread (niet elk bericht). Verwijderde berichten
- * gaan uit de index. Zonder FTS5 zoekt een LIKE-query met prepared statements
- * en ESCAPE, op dezelfde manier.
+ * worden één resultaat per thread (niet elk bericht); valt dat openingsbericht
+ * ook inhoudelijk, dan blijft alleen de teksttreffer. Een titeltreffer opent het
+ * eerste niet-verwijderde bericht. Verwijderde berichten gaan uit de index.
+ * Zonder FTS5 zoekt een LIKE-query met prepared statements en ESCAPE, en telt
+ * alleen vertalingen waarvan de hash nog bij de tekst hoort.
  */
 
 const FM_SEARCH_PER_PAGE = 20;
@@ -297,6 +299,8 @@ function fm_search_union_sql(array $terms, ?string $section, string $engine): ar
 {
     $sectionSql = $section === null ? '' : ' AND t.section = ?';
     $sectionParams = $section === null ? [] : [$section];
+    // Eerste levende bericht: een verwijderd openingsbericht is geen anker.
+    $livePost = '(SELECT MIN(fp.id) FROM posts fp WHERE fp.thread_id = t.id AND fp.deleted_at IS NULL)';
     if ($engine === 'fts') {
         $content = '(' . fm_search_fts_and($terms) . ') AND (' . fm_search_fts_body_any($terms) . ')';
         $title = '{title} : (' . fm_search_fts_and($terms) . ')';
@@ -308,7 +312,7 @@ function fm_search_union_sql(array $terms, ?string $section, string $engine): ar
             JOIN threads t ON t.id = p.thread_id
             WHERE s.kind = 'post' AND search_fts MATCH ?{$sectionSql}
             UNION ALL
-            SELECT 'thread' AS kind, (SELECT MIN(fp.id) FROM posts fp WHERE fp.thread_id = t.id) AS post_id,
+            SELECT 'thread' AS kind, {$livePost} AS post_id,
                 t.id AS thread_id, t.title AS title, t.section AS section, t.author AS author, t.created_at AS created_at,
                 '' AS body, bm25(search_fts, 5.0, 1.0, 0.8) AS score
             FROM search_fts
@@ -323,13 +327,13 @@ function fm_search_union_sql(array $terms, ?string $section, string $engine): ar
     $contentParams = [];
     $any = [];
     $anyParams = [];
+    $translationLike = "EXISTS (SELECT 1 FROM post_translations tr WHERE tr.post_id = p.id"
+        . " AND tr.source_hash = fm_search_body_hash(p.body) AND lower(tr.text) LIKE ? ESCAPE '\\')";
     foreach ($terms as $term) {
         $like = fm_search_like_pattern($term);
-        $contentWhere[] = "(lower(t.title) LIKE ? ESCAPE '\\' OR lower(p.body) LIKE ? ESCAPE '\\' OR EXISTS (
-            SELECT 1 FROM post_translations tr WHERE tr.post_id = p.id AND lower(tr.text) LIKE ? ESCAPE '\\'))";
+        $contentWhere[] = "(lower(t.title) LIKE ? ESCAPE '\\' OR lower(p.body) LIKE ? ESCAPE '\\' OR $translationLike)";
         array_push($contentParams, $like, $like, $like);
-        $any[] = "(lower(p.body) LIKE ? ESCAPE '\\' OR EXISTS (
-            SELECT 1 FROM post_translations tr WHERE tr.post_id = p.id AND lower(tr.text) LIKE ? ESCAPE '\\'))";
+        $any[] = "(lower(p.body) LIKE ? ESCAPE '\\' OR $translationLike)";
         array_push($anyParams, $like, $like);
     }
     $contentWhere[] = '(' . implode(' OR ', $any) . ')';
@@ -344,7 +348,7 @@ function fm_search_union_sql(array $terms, ?string $section, string $engine): ar
         $titleWhere[] = "lower(t.title) LIKE ? ESCAPE '\\'";
         $titleParams[] = fm_search_like_pattern($term);
     }
-    $titleWhere[] = 'EXISTS (SELECT 1 FROM posts p WHERE p.thread_id = t.id)';
+    $titleWhere[] = 'EXISTS (SELECT 1 FROM posts lp WHERE lp.thread_id = t.id AND lp.deleted_at IS NULL)';
     if ($section !== null) {
         $titleWhere[] = 't.section = ?';
         $titleParams[] = $section;
@@ -354,7 +358,7 @@ function fm_search_union_sql(array $terms, ?string $section, string $engine): ar
         FROM posts p JOIN threads t ON t.id = p.thread_id
         WHERE " . implode(' AND ', $contentWhere) . "
         UNION ALL
-        SELECT 'thread' AS kind, (SELECT MIN(fp.id) FROM posts fp WHERE fp.thread_id = t.id) AS post_id,
+        SELECT 'thread' AS kind, {$livePost} AS post_id,
             t.id AS thread_id, t.title AS title, t.section AS section, t.author AS author, t.created_at AS created_at,
             '' AS body, 0 AS score
         FROM threads t
@@ -378,6 +382,25 @@ function fm_search_execute(array $terms, ?string $section, int $page, string $en
     }
     [$union, $params] = fm_search_union_sql($terms, $section, $engine);
     $pdo = fm_db();
+    if ($engine === 'like') {
+        // Zelfde hash als de index: een verouderde vertaling telt niet mee.
+        $pdo->sqliteCreateFunction('fm_search_body_hash', static function (mixed $body): string {
+            $body = is_string($body) ? $body : '';
+
+            return function_exists('fm_source_hash') ? fm_source_hash($body) : hash('sha256', $body);
+        }, 1);
+    }
+    // UNION ALL houdt titel- en tekstrij uit elkaar (andere kind/body/score). Eén post_id.
+    $union = "SELECT kind, post_id, thread_id, title, section, author, created_at, body, score
+        FROM (
+            SELECT kind, post_id, thread_id, title, section, author, created_at, body, score,
+                ROW_NUMBER() OVER (
+                    PARTITION BY post_id
+                    ORDER BY CASE kind WHEN 'post' THEN 0 ELSE 1 END
+                ) AS pick
+            FROM ($union) raw
+        ) ranked
+        WHERE pick = 1";
     $count = $pdo->prepare("SELECT COUNT(*) FROM ($union) hits WHERE hits.post_id IS NOT NULL");
     $count->execute($params);
     $total = (int) $count->fetchColumn();
