@@ -384,6 +384,8 @@ $extra = "See\n\n```php\necho 1;\n```\n\n```php\necho 2;\n```";
 check(str_contains(fm_restore_fenced_code($extra, $src), 'echo 1') && str_contains(fm_restore_fenced_code($extra, $src), 'echo 2'), 'afwijkend aantal blokken niet herschreven');
 $alSrc = "Uitleg\n\n```al\ncodeunit 50100 Foo\n```";
 check(!str_contains(fm_shield_fenced_code($alSrc), 'codeunit'), 'al-blok ook afgeschermd');
+$ytSrc = "Kijk\n\n```\nhttps://www.youtube.com/watch?v=dQw4w9WgXcQ\n```";
+check(str_contains($ytSrc, 'youtube.com') && !str_contains(fm_shield_fenced_code($ytSrc), 'youtube.com'), 'youtube in een codeblok niet naar de vertaler');
 $pair = "```js\nconst a = 1;\n```\n\nen\n\n```sql\nSELECT 1;\n```";
 $pairBlocks = fm_fenced_code_blocks($pair);
 $pairShield = fm_shield_fenced_code($pair);

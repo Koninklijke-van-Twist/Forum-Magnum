@@ -160,5 +160,7 @@ $html = $r('https://www.youtube.com/watch?v=' . $id . '&t=43xonload=alert(1)');
 check(str_contains($html, 'data-yt-id="' . $id . '"') && !str_contains($html, 'data-yt-start') && !str_contains($html, 'onload'), 'ongeldige start komt niet in de HTML');
 check(!str_contains($r('<iframe src="https://www.youtube.com/embed/' . $id . '"></iframe>'), '<iframe'), 'willekeurige iframe blijft ge-escaped');
 check(str_contains($r('https://youtu.be/' . $id), 'aria-label="YouTube-video afspelen"'), 'knop met toegankelijke naam');
+$html = $r("```\nhttps://www.youtube.com/watch?v=$id\n```");
+check(str_contains($html, 'message-md-pre') && str_contains($html, 'youtube.com/watch?v=' . $id) && !str_contains($html, 'yt-embed') && !str_contains($html, '<iframe') && !str_contains($html, 'data-yt-id'), 'youtube in een codeblok blijft code');
 
 finish('markdown');
