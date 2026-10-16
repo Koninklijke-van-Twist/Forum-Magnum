@@ -330,6 +330,7 @@ form.inline { display: inline; }
 .message-md-code { background: #eef1f5; border-radius: 4px; padding: 0 4px; font-family: ui-monospace, Consolas, monospace; font-size: .9em; }
 .message-md-pre { background: #14202e; color: #e6edf3; border-radius: 8px; padding: 10px 12px; overflow-x: auto; }
 .message-md-pre code { font-family: ui-monospace, Consolas, monospace; font-size: .88em; }
+.message-md-pre code.hljs { background: transparent; padding: 0; }
 .message-md-quote { margin: 6px 0; padding: 4px 12px; border-left: 4px solid var(--line); color: var(--muted); }
 .message-md-list { margin: 6px 0; padding-left: 22px; }
 .message-md-heading { margin: 10px 0 4px; line-height: 1.25; }
@@ -440,7 +441,6 @@ form.inline { display: inline; }
 .preview-fallback, .preview-note { margin: 8px 0 0; color: var(--muted); }
 .preview-doc .message-md-table { width: max-content; max-width: 100%; }
 .preview .message-md-pre { margin: 0; max-height: 60vh; }
-.preview .message-md-pre code.hljs { background: transparent; padding: 0; }
 @media (max-width: 700px) {
     .preview-modal { width: calc(100vw - 12px); max-height: calc(100dvh - 12px); }
     .preview-modal .preview { max-height: calc(100dvh - 12px); border-radius: 10px; }

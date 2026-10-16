@@ -30,6 +30,7 @@ const FM_CODE_LANG = [
     'yaml' => 'yaml', 'yml' => 'yaml',
     'py' => 'python',
     'sh' => 'bash', 'bash' => 'bash', 'zsh' => 'bash',
+    'ps1' => 'powershell', 'psm1' => 'powershell', 'psd1' => 'powershell', 'pwsh' => 'powershell',
     'c' => 'c', 'h' => 'c', 'cpp' => 'cpp', 'cc' => 'cpp', 'hpp' => 'cpp', 'cxx' => 'cpp',
     'java' => 'java', 'go' => 'go', 'rs' => 'rust', 'rb' => 'ruby', 'pl' => 'perl',
     'ini' => 'ini', 'env' => 'ini', 'toml' => 'ini', 'conf' => 'ini',

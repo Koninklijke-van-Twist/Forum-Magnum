@@ -264,6 +264,63 @@ document.addEventListener('click', function (e) {
         done();
     }
 });
+/* Syntaxiskleuring van fenced codeblokken (en bijlage-bron). Lokaal highlight.js, geen CDN.
+   Alleen talen die de bundle kent; ```al en andere onbekende talen blijven platte tekst.
+   highlight.js leest textContent van de al ge-escapete <code> en schrijft zelf weer ge-escapete spans. */
+(function () {
+    'use strict';
+    var hljsLoading = null;
+    function loadHljs() {
+        if (window.hljs && window.hljs.getLanguage && window.hljs.getLanguage('powershell')) {
+            return Promise.resolve();
+        }
+        if (hljsLoading) { return hljsLoading; }
+        hljsLoading = new Promise(function (resolve) {
+            function loadPowershell() {
+                if (!window.hljs) { resolve(); return; }
+                if (window.hljs.getLanguage('powershell')) { resolve(); return; }
+                var ps = document.createElement('script');
+                ps.src = 'assets/highlight-powershell.min.js';
+                ps.onload = function () { resolve(); };
+                ps.onerror = function () { resolve(); };
+                document.head.appendChild(ps);
+            }
+            if (window.hljs) { loadPowershell(); return; }
+            var link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = 'assets/highlight-github-dark.min.css';
+            document.head.appendChild(link);
+            var s = document.createElement('script');
+            s.src = 'assets/highlight.min.js';
+            s.onload = loadPowershell;
+            s.onerror = function () { resolve(); };
+            document.head.appendChild(s);
+        });
+        return hljsLoading;
+    }
+    function highlight(root) {
+        if (!root || !root.querySelectorAll) { return; }
+        var codes = root.querySelectorAll('pre code[class*="language-"]');
+        if (!codes.length) { return; }
+        loadHljs().then(function () {
+            if (!window.hljs || !window.hljs.getLanguage) { return; }
+            Array.prototype.forEach.call(codes, function (el) {
+                if (el.getAttribute('data-highlighted') === 'yes') { return; }
+                var match = /(?:^|\s)language-([\w-]+)/.exec(el.className || '');
+                // Onbekend (al) of nog niet geladen: ge-escapete platte tekst laten staan.
+                if (!match || !window.hljs.getLanguage(match[1])) { return; }
+                try { window.hljs.highlightElement(el); } catch (err) { /* platte tekst blijft staan */ }
+            });
+        });
+    }
+    window.fmHighlight = highlight;
+    function boot() { highlight(document); }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot);
+    } else {
+        boot();
+    }
+})();
 // Vertaalde berichten: wisselen tussen vertaling en origineel.
 document.addEventListener('click', function (e) {
     var b = e.target.closest && e.target.closest('[data-toggle-original]');
@@ -310,7 +367,7 @@ document.addEventListener('click', function (e) {
         var inserted = false;
         if (info.html && post) {
             var existing = post.querySelector('[data-translated]');
-            if (existing) { existing.innerHTML = info.html; inserted = true; } // vernieuwde vertaling (opnieuw aangevraagd)
+            if (existing) { existing.innerHTML = info.html; inserted = true; if (window.fmHighlight) { window.fmHighlight(existing); } } // vernieuwde vertaling (opnieuw aangevraagd)
             var body = existing ? null : post.querySelector('[data-body]');
             if (body) {
                 inserted = true;
@@ -323,6 +380,7 @@ document.addEventListener('click', function (e) {
                 body.setAttribute('data-original', '');
                 body.hidden = true;
                 body.parentNode.insertBefore(tr, body);
+                if (window.fmHighlight) { window.fmHighlight(tr); }
                 // Wisselknop in het ⋯-menu (vóór 'Kopieer link').
                 var menu = post.querySelector('.post-menu-list');
                 if (menu && !menu.querySelector('[data-toggle-original]')) {
@@ -464,11 +522,12 @@ document.addEventListener('click', function (e) {
                 art.replaceWith(el);
                 if (wasOpen) { var b = el.querySelector('[data-toggle-original]'); if (b) { b.click(); } } // lezer keek naar het origineel
                 inserted = true;
+                if (window.fmHighlight) { window.fmHighlight(el); }
                 if (typeof fitAll === 'function') { fitAll(el); }
             } else if (!row.deleted) {
                 if (row.page === page) {
                     var nel = toElement(row.html);
-                    if (nel) { list.appendChild(nel); inserted = true; if (typeof fitAll === 'function') { fitAll(nel); } }
+                    if (nel) { list.appendChild(nel); inserted = true; if (window.fmHighlight) { window.fmHighlight(nel); } if (typeof fitAll === 'function') { fitAll(nel); } }
                 } else if (row.page > page) {
                     notice('new', list.getAttribute('data-new-posts'), data.last_url || list.getAttribute('data-last-url'));
                 }
@@ -505,34 +564,8 @@ document.addEventListener('click', function (e) {
 /* Bijlage: klik op miniatuur of naam opent een voorbeeld; Downloaden zit in de modal. */
 (function () {
     'use strict';
-    var modal = null, opener = null, seq = 0, hljsLoading = null;
+    var modal = null, opener = null, seq = 0;
 
-    function loadHljs() {
-        if (window.hljs) { return Promise.resolve(); }
-        if (hljsLoading) { return hljsLoading; }
-        hljsLoading = new Promise(function (resolve) {
-            var link = document.createElement('link');
-            link.rel = 'stylesheet';
-            link.href = 'assets/highlight-github-dark.min.css';
-            document.head.appendChild(link);
-            var s = document.createElement('script');
-            s.src = 'assets/highlight.min.js';
-            s.onload = function () { resolve(); };
-            s.onerror = function () { resolve(); };
-            document.head.appendChild(s);
-        });
-        return hljsLoading;
-    }
-    function highlight(root) {
-        var codes = root.querySelectorAll('pre code[class*="language-"]');
-        if (!codes.length) { return; }
-        loadHljs().then(function () {
-            if (!window.hljs) { return; }
-            Array.prototype.forEach.call(codes, function (el) {
-                try { window.hljs.highlightElement(el); } catch (err) { /* onbekende taal: platte tekst blijft staan */ }
-            });
-        });
-    }
     function cleanup() {
         if (modal) { modal.remove(); modal = null; }
         if (opener && opener.focus) { opener.focus(); }
@@ -562,7 +595,7 @@ document.addEventListener('click', function (e) {
                 });
                 document.body.appendChild(modal);
                 if (typeof modal.showModal === 'function') { modal.showModal(); }
-                highlight(modal);
+                if (window.fmHighlight) { window.fmHighlight(modal); }
             })
             .catch(function () { if (my === seq) { opener = null; } });
     }
@@ -577,10 +610,6 @@ document.addEventListener('click', function (e) {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) { return; }
         e.preventDefault();
         openPreview(a);
-    });
-    document.addEventListener('DOMContentLoaded', function () {
-        var page = document.querySelector('main > .preview');
-        if (page) { highlight(page); }
     });
 })();
 
