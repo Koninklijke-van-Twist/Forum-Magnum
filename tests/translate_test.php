@@ -393,6 +393,12 @@ $pairSwapped = str_replace([$pairBlocks[0]['token'], $pairBlocks[1]['token']], [
 $pairSwapped = str_replace('__TMP__', $pairBlocks[1]['token'], $pairSwapped);
 $pairBack = fm_restore_fenced_code($pairSwapped, $pair);
 check(str_starts_with($pairBack, "```sql\nSELECT 1;\n```\n\nen\n\n```js\nconst a = 1;\n```"), 'tokens houden het juiste blok, ook als de volgorde wisselt');
+$inline = fm_restore_fenced_code('See `' . $blocks[0]['token'] . '` now', $src);
+check_same("See\n" . $blocks[0]['raw'] . "\nnow", $inline, 'inline placeholder wordt een los codeblok');
+check(str_contains(renderTicketMessageMarkdown($inline), 'class="language-php"') && !str_contains($inline, 'See ```'), 'inline herstel blijft een fence voor de renderer');
+$partial = "```\n" . $pairBlocks[0]['token'] . "\n```\n\nand\n\n```sql\nSELECT translated;\n```";
+$partialBack = fm_restore_fenced_code($partial, $pair);
+check(str_contains($partialBack, "```js\nconst a = 1;\n```") && str_contains($partialBack, "```sql\nSELECT 1;\n```") && str_contains($partialBack, 'and') && !str_contains($partialBack, 'translated'), 'ontbrekende token vult de overgebleven fence');
 $codeBody = "Zie\n\n```html\n<script>alert(1)</script>\n```\n\nKlaar";
 $codeId = fm_first_post_id(fm_create_thread('general', 'jan@kvt.nl', 'Codeblok', $codeBody));
 $codePost = fm_get_post($codeId);

@@ -369,7 +369,11 @@ function fm_shield_fenced_code(string $text): string
     return implode("\n", $out);
 }
 
-/** Zet placeholders terug, of — als die weg zijn — de originele blokken op volgorde bij een gelijk aantal. */
+/**
+ * Zet placeholders terug. Een token midden in een regel wordt een eigen fence,
+ * zodat de renderer hem als codeblok ziet. Blokken waarvan de token weg is,
+ * vullen daarna de overgebleven fences, als dat aantal klopt.
+ */
 function fm_restore_fenced_code(string $translated, string $source): string
 {
     $blocks = fm_fenced_code_blocks($source);
@@ -377,16 +381,16 @@ function fm_restore_fenced_code(string $translated, string $source): string
         return $translated;
     }
     $out = str_replace(["\r\n", "\r"], "\n", $translated);
-    $found = false;
+    $missing = [];
     foreach ($blocks as $block) {
         if (!str_contains($out, $block['token'])) {
+            $missing[] = $block;
             continue;
         }
-        $found = true;
         $out = fm_replace_fenced_token($out, $block['token'], $block['raw']);
     }
-    if (!$found) {
-        $out = fm_replace_fences_in_order($out, $blocks);
+    if ($missing !== []) {
+        $out = fm_replace_unrestored_fences($out, $blocks, $missing);
     }
 
     return $out;
@@ -421,9 +425,7 @@ function fm_replace_fenced_token(string $text, string $token, string $raw): stri
         }
         $line = $lines[$index];
         if (str_contains($line, $token)) {
-            $line = str_replace('`' . $token . '`', $raw, $line);
-            $line = str_replace($token, $raw, $line);
-            foreach (explode("\n", $line) as $part) {
+            foreach (fm_lines_for_inline_token($line, $token, $raw) as $part) {
                 $out[] = $part;
             }
         } else {
@@ -436,22 +438,87 @@ function fm_replace_fenced_token(string $text, string $token, string $raw): stri
 }
 
 /**
- * @param list<array{raw:string}> $blocks
+ * Een token die niet al in een eigen fence staat, wordt een los codeblok.
+ * Tekst ervoor en erna blijft op een eigen regel, zodat de fence niet aan het proza plakt.
+ *
+ * @return list<string>
  */
-function fm_replace_fences_in_order(string $text, array $blocks): string
+function fm_lines_for_inline_token(string $line, string $token, string $raw): array
+{
+    $wrapped = '`' . $token . '`';
+    $pos = strpos($line, $wrapped);
+    $length = strlen($wrapped);
+    if ($pos === false) {
+        $pos = strpos($line, $token);
+        $length = strlen($token);
+    }
+    if ($pos === false) {
+        return [$line];
+    }
+    $prefix = substr($line, 0, $pos);
+    $suffix = substr($line, $pos + $length);
+    $out = [];
+    if (trim($prefix) !== '') {
+        $out[] = rtrim($prefix);
+    }
+    foreach (explode("\n", $raw) as $rawLine) {
+        $out[] = $rawLine;
+    }
+    if (trim($suffix) !== '') {
+        foreach (fm_lines_for_inline_token(ltrim($suffix), $token, $raw) as $part) {
+            $out[] = $part;
+        }
+    }
+
+    return $out;
+}
+
+/**
+ * Fences die nog niet het origineel zijn, vervangen door de blokken waarvan de token ontbrak.
+ * Alleen als het aantal klopt; anders blijft de tekst staan.
+ *
+ * @param list<array{token:string, raw:string}> $allBlocks
+ * @param list<array{token:string, raw:string}> $missing
+ */
+function fm_replace_unrestored_fences(string $text, array $allBlocks, array $missing): string
 {
     $lines = explode("\n", $text);
     $spans = fm_fenced_code_span_list($lines);
-    if (count($spans) !== count($blocks)) {
+    $missingTokens = [];
+    foreach ($missing as $block) {
+        $missingTokens[$block['token']] = true;
+    }
+    $restoredRaws = [];
+    foreach ($allBlocks as $block) {
+        if (!isset($missingTokens[$block['token']])) {
+            $restoredRaws[] = $block['raw'];
+        }
+    }
+    $unclaimed = [];
+    foreach ($spans as [$start, $end]) {
+        $raw = implode("\n", array_slice($lines, $start, $end - $start + 1));
+        $claimed = false;
+        foreach ($restoredRaws as $i => $known) {
+            if ($raw === $known) {
+                unset($restoredRaws[$i]);
+                $claimed = true;
+                break;
+            }
+        }
+        if (!$claimed) {
+            $unclaimed[] = [$start, $end];
+        }
+    }
+    if (count($unclaimed) !== count($missing)) {
         return $text;
     }
     $out = [];
     $cursor = 0;
-    foreach ($spans as $i => [$start, $end]) {
+    foreach ($unclaimed as $i => [$start, $end]) {
         for ($line = $cursor; $line < $start; $line++) {
             $out[] = $lines[$line];
         }
-        foreach (explode("\n", $blocks[$i]['raw']) as $rawLine) {
+        foreach (explode("\n", $missing[$i]['raw']) as $rawLine) {
             $out[] = $rawLine;
         }
         $cursor = $end + 1;
