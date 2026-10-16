@@ -38,7 +38,7 @@ function fm_safe_return_url(string $back): string
     if (str_contains($back, '//') || str_contains($back, '\\') || preg_match('/[\x00-\x20\x7f]/', $back) === 1) {
         return 'index.php';
     }
-    if (preg_match('~^/?(?:[A-Za-z0-9_./-]*/)?(index|section|new|thread|notifications|preview)\.php(\?[^\s#]*)?$~', $back, $m) !== 1) {
+    if (preg_match('~^/?(?:[A-Za-z0-9_./-]*/)?(index|section|new|thread|notifications|preview|search)\.php(\?[^\s#]*)?$~', $back, $m) !== 1) {
         return 'index.php';
     }
     if ($m[1] !== 'preview') {
@@ -123,13 +123,14 @@ function fm_new_thread_url(string $section): string
  * Kop + nieuwe-thread-knop + lijst + paginering van één sectie.
  * $headingHtml vervangt de kop (bijv. een kruimelpad op de sectiepagina).
  */
-function fm_section_block_html(string $section, string $email, int $page, int $perPage, callable $pageUrl, string $tag, ?string $headingHtml = null): string
+function fm_section_block_html(string $section, string $email, int $page, int $perPage, callable $pageUrl, string $tag, ?string $headingHtml = null, string $barExtraHtml = ''): string
 {
     $pages = fm_page_count(fm_count_threads($section), $perPage);
     $page = max(1, min($pages, $page));
     $heading = $headingHtml ?? ('<' . $tag . '><a class="section-link" href="' . h(fm_section_page_url($section)) . '">' . h(fm_section_label($section)) . '</a></' . $tag . '>');
 
     return '<div class="bar">' . $heading
+        . $barExtraHtml
         . (fm_can_create_thread($section, $email) ? '<a class="btn" href="' . h(fm_new_thread_url($section)) . '">' . h(fm_t('new_thread')) . '</a>' : '')
         . '</div>'
         . fm_thread_list_html(fm_list_threads($section, $email, $page, $perPage))

@@ -17,6 +17,6 @@ if (!fm_is_section($section)) {
 $label = fm_section_label($section);
 fm_header($label, [[$label, null]]);
 echo '<section class="home-section section-' . h($section) . '" id="sec-' . h($section) . '">'
-    . fm_section_block_html($section, $fmUser, (int) ($_GET['p'] ?? 1), FM_THREADS_PER_PAGE, static fn (int $n) => fm_section_page_url($section, $n), 'h1', fm_breadcrumb_html([[$label, null]]))
+    . fm_section_block_html($section, $fmUser, (int) ($_GET['p'] ?? 1), FM_THREADS_PER_PAGE, static fn (int $n) => fm_section_page_url($section, $n), 'h1', fm_breadcrumb_html([[$label, null]]), fm_search_form_html($section))
     . '</section>';
 fm_footer();

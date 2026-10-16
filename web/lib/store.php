@@ -12,6 +12,7 @@ declare(strict_types=1);
  * directory   server-side cache van Entra-gebruikersinfo.
  * post_translations  automatische vertalingen per bericht en taal (zie translate.php).
  * post_attachments  bijlagen per bericht (bestand op schijf via SHA-256, zie attachments.php).
+ * search_index / search_fts  zoekindex (FTS5) over titel, tekst en vertalingen (zie search.php).
  */
 
 const FM_SECTIONS = ['announcements', 'work', 'general'];
@@ -20,7 +21,7 @@ const FM_THREADS_PER_PAGE = 20;
 const FM_HOME_PER_PAGE = ['announcements' => 5, 'work' => 10, 'general' => 10];
 const FM_POSTS_PER_PAGE = 50;
 /** Schemaversie in PRAGMA user_version; verhogen bij elke schemawijziging. */
-const FM_SCHEMA_VERSION = 9;
+const FM_SCHEMA_VERSION = 10;
 
 function fm_data_dir(): string
 {
@@ -213,6 +214,13 @@ function fm_migrate(PDO $pdo): void
             $pdo->exec("CREATE TRIGGER IF NOT EXISTS trg_posts_touch AFTER UPDATE ON posts WHEN NEW.updated_at = OLD.updated_at
                 BEGIN UPDATE posts SET updated_at = (SELECT COALESCE(MAX(updated_at), 0) + 1 FROM posts) WHERE id = NEW.id; END");
         }
+        if ($version < 10) {
+            // Zoekindex. Zonder FTS5 blijft de versie wel omhoog; zoeken valt dan terug op LIKE.
+            if (!function_exists('fm_search_migrate')) {
+                throw new RuntimeException('search_migrate');
+            }
+            fm_search_migrate($pdo);
+        }
         $pdo->exec('PRAGMA user_version = ' . FM_SCHEMA_VERSION);
         $pdo->exec('COMMIT');
     } catch (Throwable $e) {
@@ -395,6 +403,9 @@ function fm_insert_post(PDO $pdo, int $threadId, string $email, string $body, in
     if (function_exists('fm_queue_translation')) {
         fm_queue_translation($postId);
     }
+    if (function_exists('fm_search_on_insert')) {
+        fm_search_on_insert($pdo, $postId);
+    }
 
     return $postId;
 }
@@ -457,11 +468,17 @@ function fm_edit_post(int $postId, string $email, string $body, ?string $title =
             fm_queue_translation($postId);
         }
         fm_attach_files($pdo, $postId, $files, $now);
+        $titleChanged = false;
         if ($title !== null && fm_first_post_id((int) $post['thread_id']) === $postId) {
             $title = fm_clean_text(str_replace("\n", ' ', $title), 150);
             if ($title !== '') {
+                $current = fm_get_thread((int) $post['thread_id']);
+                $titleChanged = $current === null || (string) $current['title'] !== $title;
                 $pdo->prepare('UPDATE threads SET title = ? WHERE id = ?')->execute([$title, (int) $post['thread_id']]);
             }
+        }
+        if (function_exists('fm_search_on_edit')) {
+            fm_search_on_edit($pdo, $postId, $titleChanged);
         }
     });
 }
@@ -490,6 +507,9 @@ function fm_delete_post(int $postId, string $email): void
         $pdo->prepare('DELETE FROM mentions WHERE post_id = ?')->execute([$postId]);
         $pdo->prepare('DELETE FROM post_translations WHERE post_id = ?')->execute([$postId]);
         $pdo->prepare("UPDATE posts SET translation_status = '', translation_requested_at = 0, translation_failed_at = 0, translation_attempts = 0 WHERE id = ?")->execute([$postId]);
+        if (function_exists('fm_search_on_delete')) {
+            fm_search_on_delete($pdo, $postId);
+        }
         fm_refresh_thread_meta((int) $post['thread_id']);
     });
 }
@@ -735,3 +755,6 @@ function fm_thread_version(int $threadId): int
 
     return (int) $st->fetchColumn();
 }
+
+// Zoekindex hoort bij het schema; laden vóór de eerste fm_db()-aanroep (migratie versie 10).
+require_once __DIR__ . '/search.php';

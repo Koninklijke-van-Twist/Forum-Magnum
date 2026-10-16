@@ -354,6 +354,9 @@ function fm_store_translations(int $postId, string $hash, array $translations, ?
         $pdo->prepare("UPDATE posts SET translation_status = 'done', translation_attempts = 0, translation_failed_at = 0, translation_error = '',
             source_lang = CASE WHEN ? <> '' THEN ? ELSE source_lang END WHERE id = ?")
             ->execute([(string) $source, (string) $source, $postId]);
+        if (function_exists('fm_search_on_translation')) {
+            fm_search_on_translation($pdo, $postId);
+        }
 
         return true;
     });
