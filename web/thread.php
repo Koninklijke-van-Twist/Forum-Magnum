@@ -89,7 +89,7 @@ if ($posts !== []) {
 $pagerUrl = static fn (int $n) => fm_thread_url($threadId, $n);
 $backUrl = fm_section_page_url($section, fm_thread_list_page(fm_get_thread($threadId) ?? $thread));
 fm_header((string) $thread['title'], [[fm_section_label($section), $backUrl], [(string) $thread['title'], null]]);
-echo '<div class="bar">' . fm_breadcrumb_html([[fm_section_label($section), $backUrl], [(string) $thread['title'], null]]) . fm_search_form_html($section) . '</div>';
+echo '<div class="bar">' . fm_breadcrumb_html([[fm_section_label($section), $backUrl], [(string) $thread['title'], null]]) . fm_search_form_html(null, '', $threadId) . '</div>';
 if ($error !== '') {
     echo '<p class="flash error">' . h($error) . '</p>';
 }

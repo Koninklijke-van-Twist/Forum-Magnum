@@ -261,7 +261,10 @@ function fm_search_normalize_query(string $query): string
 
 function fm_search_fts_quote(string $term): string
 {
-    return '"' . str_replace('"', '', $term) . '"';
+    // Ster staat buiten de quotes: FTS5-prefix op dit ene woord, geen vrije query.
+    $safe = str_replace(['"', '*'], '', $term);
+
+    return '"' . $safe . '"*';
 }
 
 /** @param list<string> $terms */
@@ -295,10 +298,22 @@ function fm_search_like_pattern(string $term): string
  * @param list<string> $terms
  * @return array{0:string,1:list<string>}
  */
-function fm_search_union_sql(array $terms, ?string $section, string $engine): array
+function fm_search_union_sql(array $terms, ?string $section, string $engine, ?int $threadId = null): array
 {
-    $sectionSql = $section === null ? '' : ' AND t.section = ?';
-    $sectionParams = $section === null ? [] : [$section];
+    if ($threadId !== null && $threadId > 0) {
+        $scopeSql = ' AND t.id = ?';
+        $scopeWhere = 't.id = ?';
+        $scopeParams = [$threadId];
+        $section = null;
+    } elseif ($section !== null) {
+        $scopeSql = ' AND t.section = ?';
+        $scopeWhere = 't.section = ?';
+        $scopeParams = [$section];
+    } else {
+        $scopeSql = '';
+        $scopeWhere = '';
+        $scopeParams = [];
+    }
     // Eerste levende bericht: een verwijderd openingsbericht is geen anker.
     $livePost = '(SELECT MIN(fp.id) FROM posts fp WHERE fp.thread_id = t.id AND fp.deleted_at IS NULL)';
     if ($engine === 'fts') {
@@ -310,7 +325,7 @@ function fm_search_union_sql(array $terms, ?string $section, string $engine): ar
             JOIN search_index s ON s.id = search_fts.rowid
             JOIN posts p ON p.id = s.ref_id AND p.deleted_at IS NULL
             JOIN threads t ON t.id = p.thread_id
-            WHERE s.kind = 'post' AND search_fts MATCH ?{$sectionSql}
+            WHERE s.kind = 'post' AND search_fts MATCH ?{$scopeSql}
             UNION ALL
             SELECT 'thread' AS kind, {$livePost} AS post_id,
                 t.id AS thread_id, t.title AS title, t.section AS section, t.author AS author, t.created_at AS created_at,
@@ -318,9 +333,9 @@ function fm_search_union_sql(array $terms, ?string $section, string $engine): ar
             FROM search_fts
             JOIN search_index s ON s.id = search_fts.rowid
             JOIN threads t ON t.id = s.thread_id
-            WHERE s.kind = 'thread' AND search_fts MATCH ?{$sectionSql}";
+            WHERE s.kind = 'thread' AND search_fts MATCH ?{$scopeSql}";
 
-        return [$sql, array_merge([$content], $sectionParams, [$title], $sectionParams)];
+        return [$sql, array_merge([$content], $scopeParams, [$title], $scopeParams)];
     }
 
     $contentWhere = ['p.deleted_at IS NULL'];
@@ -338,9 +353,9 @@ function fm_search_union_sql(array $terms, ?string $section, string $engine): ar
     }
     $contentWhere[] = '(' . implode(' OR ', $any) . ')';
     $contentParams = array_merge($contentParams, $anyParams);
-    if ($section !== null) {
-        $contentWhere[] = 't.section = ?';
-        $contentParams[] = $section;
+    if ($scopeWhere !== '') {
+        $contentWhere[] = $scopeWhere;
+        $contentParams = array_merge($contentParams, $scopeParams);
     }
     $titleWhere = [];
     $titleParams = [];
@@ -349,9 +364,9 @@ function fm_search_union_sql(array $terms, ?string $section, string $engine): ar
         $titleParams[] = fm_search_like_pattern($term);
     }
     $titleWhere[] = 'EXISTS (SELECT 1 FROM posts lp WHERE lp.thread_id = t.id AND lp.deleted_at IS NULL)';
-    if ($section !== null) {
-        $titleWhere[] = 't.section = ?';
-        $titleParams[] = $section;
+    if ($scopeWhere !== '') {
+        $titleWhere[] = $scopeWhere;
+        $titleParams = array_merge($titleParams, $scopeParams);
     }
     $sql = "SELECT 'post' AS kind, p.id AS post_id, t.id AS thread_id, t.title AS title, t.section AS section,
             p.author AS author, p.created_at AS created_at, p.body AS body, 0 AS score
@@ -371,16 +386,17 @@ function fm_search_union_sql(array $terms, ?string $section, string $engine): ar
  * @param list<string> $terms
  * @return array{total:int,hits:list<array<string,mixed>>}
  */
-function fm_search_execute(array $terms, ?string $section, int $page, string $engine): array
+function fm_search_execute(array $terms, ?string $section, int $page, string $engine, ?int $threadId = null): array
 {
-    $section = (is_string($section) && fm_is_section($section)) ? $section : null;
+    $threadId = ($threadId !== null && $threadId > 0) ? $threadId : null;
+    $section = $threadId === null && is_string($section) && fm_is_section($section) ? $section : null;
     if ($terms === []) {
         return ['total' => 0, 'hits' => []];
     }
     if ($engine === 'fts' && !fm_search_uses_fts()) {
         $engine = 'like';
     }
-    [$union, $params] = fm_search_union_sql($terms, $section, $engine);
+    [$union, $params] = fm_search_union_sql($terms, $section, $engine, $threadId);
     $pdo = fm_db();
     if ($engine === 'like') {
         // Zelfde hash als de index: een verouderde vertaling telt niet mee.
@@ -529,8 +545,9 @@ function fm_search_snippet_html(string $text, array $terms, int $radius = 70): s
             if ($pos === false) {
                 break;
             }
-            $ranges[] = [$pos, $nlen];
-            $offset = $pos + $nlen;
+            [$start, $span] = fm_search_word_span($folded, $pos, $nlen);
+            $ranges[] = [$start, $span];
+            $offset = $start + $span;
         }
     }
     if ($ranges === []) {
@@ -605,13 +622,46 @@ function fm_search_snippet_html(string $text, array $terms, int $radius = 70): s
 }
 
 /**
- * @return array{query:string,terms:list<string>,section:?string,engine:string,total:int,page:int,pages:int,hits:list<array<string,mixed>>}
+ * Breid een treffer uit tot het hele woord, zodat een prefix ook de rest markeert.
+ *
+ * @return array{0:int,1:int} start en lengte in tekens
  */
-function fm_search(string $query, ?string $section, int $page = 1, ?string $engine = null): array
+function fm_search_word_span(string $folded, int $pos, int $nlen): array
+{
+    $start = $pos;
+    while ($start > 0) {
+        $ch = mb_substr($folded, $start - 1, 1, 'UTF-8');
+        if (preg_match('/^[\p{L}\p{N}]$/u', $ch) !== 1) {
+            break;
+        }
+        $start--;
+    }
+    $end = $pos + $nlen;
+    $len = mb_strlen($folded, 'UTF-8');
+    while ($end < $len) {
+        $ch = mb_substr($folded, $end, 1, 'UTF-8');
+        if (preg_match('/^[\p{L}\p{N}]$/u', $ch) !== 1) {
+            break;
+        }
+        $end++;
+    }
+
+    return [$start, $end - $start];
+}
+
+/**
+ * @return array{query:string,terms:list<string>,section:?string,thread_id:?int,engine:string,total:int,page:int,pages:int,hits:list<array<string,mixed>>}
+ */
+function fm_search(string $query, ?string $section, int $page = 1, ?string $engine = null, ?int $threadId = null): array
 {
     $query = fm_search_normalize_query($query);
     $terms = fm_search_terms($query);
-    $section = (is_string($section) && fm_is_section($section)) ? $section : null;
+    $threadId = ($threadId !== null && $threadId > 0) ? $threadId : null;
+    if ($threadId !== null) {
+        $section = null;
+    } else {
+        $section = (is_string($section) && fm_is_section($section)) ? $section : null;
+    }
     $engine ??= fm_search_uses_fts() ? 'fts' : 'like';
     if ($engine !== 'like' && $engine !== 'fts') {
         $engine = fm_search_uses_fts() ? 'fts' : 'like';
@@ -623,6 +673,7 @@ function fm_search(string $query, ?string $section, int $page = 1, ?string $engi
         'query' => $query,
         'terms' => $terms,
         'section' => $section,
+        'thread_id' => $threadId,
         'engine' => $engine,
         'total' => 0,
         'page' => 1,
@@ -633,19 +684,20 @@ function fm_search(string $query, ?string $section, int $page = 1, ?string $engi
         return $empty;
     }
     try {
-        $found = fm_search_execute($terms, $section, $page, $engine);
+        $found = fm_search_execute($terms, $section, $page, $engine, $threadId);
     } catch (Throwable $e) {
         if ($engine !== 'fts') {
             throw $e;
         }
         $engine = 'like';
-        $found = fm_search_execute($terms, $section, $page, 'like');
+        $found = fm_search_execute($terms, $section, $page, 'like', $threadId);
     }
 
     return [
         'query' => $query,
         'terms' => $terms,
         'section' => $section,
+        'thread_id' => $threadId,
         'engine' => $engine,
         'total' => $found['total'],
         'page' => $found['page'] ?? 1,
@@ -659,16 +711,30 @@ function fm_search_count_label(int $total): string
     return $total === 1 ? fm_t('search_results_one') : fm_t('search_results_n', $total);
 }
 
-function fm_search_url(string $query, ?string $section, ?string $from, int $page): string
+function fm_search_scope_label(?string $section, ?int $threadId): string
+{
+    if ($threadId !== null && $threadId > 0) {
+        $thread = fm_get_thread($threadId);
+        if ($thread !== null) {
+            return fm_t('search_scope_in', (string) $thread['title']);
+        }
+    }
+    if (is_string($section) && fm_is_section($section)) {
+        return fm_t('search_scope_in', fm_section_label($section));
+    }
+
+    return fm_t('search_scope_all');
+}
+
+function fm_search_url(string $query, ?string $section, ?int $threadId, int $page): string
 {
     $params = [];
     if ($query !== '') {
         $params['q'] = $query;
     }
-    if (is_string($from) && fm_is_section($from)) {
-        $params['from'] = $from;
-    }
-    if (is_string($section) && fm_is_section($section)) {
+    if ($threadId !== null && $threadId > 0) {
+        $params['thread'] = $threadId;
+    } elseif (is_string($section) && fm_is_section($section)) {
         $params['s'] = $section;
     }
     if ($page > 1) {
@@ -678,17 +744,18 @@ function fm_search_url(string $query, ?string $section, ?string $from, int $page
     return 'search.php' . ($params === [] ? '' : '?' . http_build_query($params));
 }
 
-/** Zoekbalk. $contextSection toont een uit-staand filter op die sectie; aangevinkt alleen als $limitToSection. */
-function fm_search_form_html(?string $contextSection = null, string $query = '', bool $limitToSection = false): string
+/** Zoekbalk. Index: overal. Sectie: verborgen s. Thread: verborgen thread, dat wint van de sectie. */
+function fm_search_form_html(?string $contextSection = null, string $query = '', ?int $threadId = null): string
 {
     $contextSection = (is_string($contextSection) && fm_is_section($contextSection)) ? $contextSection : null;
+    $threadId = ($threadId !== null && $threadId > 0) ? $threadId : null;
     $html = '<form class="search-form" method="get" action="search.php" role="search">'
         . '<label class="sr-only" for="fm-q">' . h(fm_t('search')) . '</label>'
         . '<input type="search" id="fm-q" name="q" value="' . h($query) . '" maxlength="' . FM_SEARCH_QUERY_MAX . '" placeholder="' . h(fm_t('search_placeholder')) . '" autocomplete="off">';
-    if ($contextSection !== null) {
-        $html .= '<input type="hidden" name="from" value="' . h($contextSection) . '">'
-            . '<label class="search-scope"><input type="checkbox" name="s" value="' . h($contextSection) . '"' . ($limitToSection ? ' checked' : '') . '> '
-            . h(fm_t('search_in_section', fm_section_label($contextSection))) . '</label>';
+    if ($threadId !== null) {
+        $html .= '<input type="hidden" name="thread" value="' . $threadId . '">';
+    } elseif ($contextSection !== null) {
+        $html .= '<input type="hidden" name="s" value="' . h($contextSection) . '">';
     }
 
     return $html . '<button type="submit" class="btn">' . h(fm_t('search')) . '</button></form>';
