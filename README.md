@@ -133,6 +133,12 @@ GitHub Actions (`.github/workflows/deploy-ftp.yml`) spiegelt `web/` bij elke pus
 de root-`.htaccess` en de analytics-database. Na de deploy volgt een rooktest op de URL en
 op `data/forum.sqlite` (moet 403/404 geven).
 
+`web/analytics/analytics.sqlite` (en `*.sqlite-*`) blijft op de server staan: de FTP-mirror
+slaat die bestanden al over, en ook `analytics/.htaccess`. Een gecommit bestand in die map
+komt dus niet mee en een bestaand `.htaccess` wordt niet gewist. `analytics.php` schrijft
+`web/analytics/.htaccess` als die ontbreekt (of vult hem aan als het woord `sqlite` er nog
+niet in staat), zodat Apache de database weigert en `analytics.php` zelf bereikbaar blijft.
+
 ## Lokaal en tests
 
 ```bash
@@ -146,4 +152,5 @@ sortering, paginering, ongelezen/open-pagina, bewerken/verwijderen, taal, schema
 vertalingen compleet), `markdown_test.php` (XSS, links, telefoonregressie, `#1185`,
 `post#123`), `users_test.php` (Graph gemockt: velden, terugval, foto-403, cache,
 afdelingskleur/contrast), `page_smoke_test.php` (alle pagina's via `php -S`, CSRF, rechten,
-taalkeuze, avatars).
+taalkeuze, avatars), `analytics_protect_test.php` (`.htaccess` voor de analytics-sqlite,
+endpoint blijft bereikbaar).
