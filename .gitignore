@@ -17,3 +17,4 @@ Thumbs.db
 *.swp
 web/analytics/*.sqlite
 web/analytics/*.sqlite-*
+web/analytics/.htaccess
