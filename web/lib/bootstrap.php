@@ -19,6 +19,7 @@ require_once __DIR__ . '/translate.php';
 require_once __DIR__ . '/search.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/postview.php';
+require_once __DIR__ . '/digest.php';
 
 $fmAuthFile = getenv('FM_AUTH_FILE') ?: __DIR__ . '/../auth.php';
 if (is_file($fmAuthFile)) {

@@ -673,3 +673,53 @@ document.addEventListener('click', function (e) {
         try { frame.focus(); } catch (err) { /* cross-origin frame */ }
     });
 })();
+
+/* Profielmenu en e-mailvoorkeuren (modal; zonder JS opent de link de losse pagina). */
+(function () {
+    'use strict';
+    document.addEventListener('click', function (e) {
+        var menu = document.querySelector('.me-menu[open]');
+        if (menu && !menu.contains(e.target)) { menu.removeAttribute('open'); }
+        var link = e.target.closest('[data-email-prefs]');
+        if (link && typeof HTMLDialogElement === 'function') {
+            e.preventDefault();
+            if (menu) { menu.removeAttribute('open'); }
+            var back = location.pathname.split('/').pop() + location.search;
+            fetch('email_prefs.php?modal=1&back=' + encodeURIComponent(back || 'index.php'), { credentials: 'same-origin' })
+                .then(function (r) { return r.ok ? r.text() : ''; })
+                .then(function (html) {
+                    if (!html) { location.href = link.href; return; }
+                    var dlg = document.createElement('dialog');
+                    dlg.className = 'digest-dialog';
+                    dlg.setAttribute('aria-labelledby', 'email-prefs-title');
+                    dlg.innerHTML = html; // server-side gerenderd en ge-escaped (fm_digest_form_html)
+                    dlg.addEventListener('close', function () { dlg.remove(); link.focus(); });
+                    document.body.appendChild(dlg);
+                    dlg.showModal();
+                });
+            return;
+        }
+        var d = e.target.closest('dialog.digest-dialog');
+        if (d && (e.target === d || e.target.closest('[data-close]'))) { e.preventDefault(); d.close(); }
+    });
+    function sync(fs) {
+        var on = fs.querySelector('[data-digest-on]');
+        var opts = fs.querySelector('.digest-opts');
+        var all = fs.querySelector('[data-digest-all]');
+        if (opts) { opts.hidden = !on.checked; }
+        fs.querySelectorAll('[data-digest-sec]').forEach(function (c) {
+            if (all && all.checked) {
+                if (!c.disabled) { c.setAttribute('data-saved', c.checked ? '1' : '0'); }
+                c.checked = true;
+                c.disabled = true;
+            } else if (c.disabled) {
+                c.disabled = false;
+                c.checked = c.getAttribute('data-saved') === '1';
+            }
+        });
+    }
+    document.addEventListener('change', function (e) {
+        var fs = e.target.closest('[data-digest-kind]');
+        if (fs) { sync(fs); }
+    });
+})();

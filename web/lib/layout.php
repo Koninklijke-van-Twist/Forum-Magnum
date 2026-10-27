@@ -38,7 +38,7 @@ function fm_safe_return_url(string $back): string
     if (str_contains($back, '//') || str_contains($back, '\\') || preg_match('/[\x00-\x20\x7f]/', $back) === 1) {
         return 'index.php';
     }
-    if (preg_match('~^/?(?:[A-Za-z0-9_./-]*/)?(index|section|new|thread|notifications|preview|search)\.php(\?[^\s#]*)?$~', $back, $m) !== 1) {
+    if (preg_match('~^/?(?:[A-Za-z0-9_./-]*/)?(index|section|new|thread|notifications|preview|search|email_prefs)\.php(\?[^\s#]*)?$~', $back, $m) !== 1) {
         return 'index.php';
     }
     if ($m[1] !== 'preview') {
@@ -277,8 +277,10 @@ function fm_header(string $title, array $crumbs = []): void
         . ($total > 0 ? '<span class="bell-count">' . $total . '</span>' : '') . '</a>'
         . '<details class="lang-menu"><summary title="' . h(fm_t('language')) . '"><img class="flag" src="assets/flags/' . h($lang) . '.svg" alt="' . h(FM_LANGUAGES[$lang][0]) . '"></summary>'
         . fm_language_form('lang-list') . '</details>'
-        . '<img class="me-avatar" src="' . h(fm_avatar_url($fmUser)) . '" alt="" title="' . h($me['name']) . '" width="32" height="32">'
-        . '</div></header><main>';
+        . '<details class="me-menu"><summary title="' . h($me['name']) . '" aria-label="' . h($me['name']) . '"><img class="me-avatar" src="' . h(fm_avatar_url($fmUser)) . '" alt="" width="32" height="32"></summary>'
+        . '<div class="me-list"><a href="email_prefs.php" data-email-prefs>' . h(fm_t('email_prefs')) . '</a></div></details>'
+        . '</div></header>'
+        . '<main>';
     $flash = fm_flash();
     if ($flash !== null) {
         echo '<p class="flash">' . h($flash) . '</p>';

@@ -13,6 +13,7 @@ declare(strict_types=1);
  * post_translations  automatische vertalingen per bericht en taal (zie translate.php).
  * post_attachments  bijlagen per bericht (bestand op schijf via SHA-256, zie attachments.php).
  * search_index / search_fts  zoekindex (FTS5) over titel, tekst en vertalingen (zie search.php).
+ * digest_prefs / digest_sent  e-mailvoorkeuren en verzendlog van de samenvattingsmails (zie digest.php).
  */
 
 const FM_SECTIONS = ['announcements', 'work', 'general'];
@@ -21,7 +22,7 @@ const FM_THREADS_PER_PAGE = 20;
 const FM_HOME_PER_PAGE = ['announcements' => 5, 'work' => 10, 'general' => 10];
 const FM_POSTS_PER_PAGE = 50;
 /** Schemaversie in PRAGMA user_version; verhogen bij elke schemawijziging. */
-const FM_SCHEMA_VERSION = 10;
+const FM_SCHEMA_VERSION = 11;
 
 function fm_data_dir(): string
 {
@@ -220,6 +221,22 @@ function fm_migrate(PDO $pdo): void
                 throw new RuntimeException('search_migrate');
             }
             fm_search_migrate($pdo);
+        }
+        if ($version < 11) {
+            // E-mailsamenvattingen: voorkeuren (JSON) per gebruiker en verzendlog per gebruiker en periode.
+            $pdo->exec('CREATE TABLE IF NOT EXISTS digest_prefs (
+                email TEXT PRIMARY KEY,
+                prefs TEXT NOT NULL
+            )');
+            $pdo->exec('CREATE TABLE IF NOT EXISTS digest_sent (
+                email TEXT NOT NULL,
+                period TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                sent_at INTEGER NOT NULL,
+                PRIMARY KEY (email, period)
+            )');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_digest_sent_kind ON digest_sent(email, kind, sent_at)');
         }
         $pdo->exec('PRAGMA user_version = ' . FM_SCHEMA_VERSION);
         $pdo->exec('COMMIT');
